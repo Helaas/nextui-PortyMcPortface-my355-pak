@@ -1,0 +1,11 @@
+{
+  "disclaimer": true,
+  "first-run": true,
+  "music-disabled": true,
+  "release_channel": "stable",
+  "sfx-disabled": true,
+  "show_experimental": false,
+  "theme": "default_theme",
+  "theme-scheme": "Darkest Mode",
+  "version": 2
+}

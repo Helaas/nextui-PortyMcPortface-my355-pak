@@ -1,0 +1,12 @@
+{
+  "name": "Porty McPortface",
+  "version": "v0.1.0",
+  "type": "TOOL",
+  "description": "Tool to manage a NextUI PortMaster runtime installation on device.",
+  "author": "helaas",
+  "repo_url": "https://github.com/Helaas/nextui-PortyMcPortface-my355-pak",
+  "release_filename": "Porty-McPortface.pakz",
+  "platforms": [
+    "my355"
+  ]
+}

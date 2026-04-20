@@ -1,0 +1,15 @@
+#!/bin/bash
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -x "$SELF_DIR/../Portmaster.sh" ]; then
+    PAK_DIR=$(CDPATH= cd -- "$SELF_DIR/.." && pwd)
+elif [ -x "$SELF_DIR/../../Portmaster.sh" ]; then
+    PAK_DIR=$(CDPATH= cd -- "$SELF_DIR/../.." && pwd)
+else
+    echo "Portmaster.sh not found relative to $SELF_DIR" >&2
+    exit 1
+fi
+
+exec "$PAK_DIR/Portmaster.sh" "$@"
