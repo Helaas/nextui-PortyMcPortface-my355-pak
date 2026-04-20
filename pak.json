@@ -2,9 +2,9 @@
   "name": "Porty McPortface",
   "version": "v0.1.0",
   "type": "TOOL",
-  "description": "Install or update the upstream PortMaster TrimUI runtime into PORTS.pak.",
+  "description": "Tool to manage a NextUI PortMaster runtime installation on device.",
   "author": "helaas",
-  "repo_url": "https://github.com/kevinvranken/nextui-portmaster-pak",
+  "repo_url": "https://github.com/Helaas/nextui-PortyMcPortface-my355-pak",
   "release_filename": "Porty-McPortface.pakz",
   "platforms": [
     "my355"
