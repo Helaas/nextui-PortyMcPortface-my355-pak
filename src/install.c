@@ -198,6 +198,11 @@ static int copy_payload_compatibility_files(const install_layout *layout) {
     if (copy_file(src, dst) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/files/libmali-g2p0.so.1.9.0", layout->payload_template_dir);
+    snprintf(dst, sizeof(dst), "%s/files/libmali-g2p0.so.1.9.0", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+
     snprintf(src, sizeof(src), "%s/files/ca-certificates.crt", layout->payload_template_dir);
     snprintf(dst, sizeof(dst), "%s/files/ca-certificates.crt", layout->payload_pak_dir);
     if (copy_file(src, dst) != 0)

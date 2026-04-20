@@ -435,16 +435,21 @@ apply_port_arch_rewrites() {
 bind_flip_libmali() {
     local source_lib="$PAK_DIR/files/libmali-g2p0.so.1.9.0"
 
-    [ -f "$source_lib" ] || return 0
+    if [ ! -f "$source_lib" ]; then
+        echo "PMI_WARN flip_libmali_missing=$source_lib"
+        return 0
+    fi
 
     if [ -f /lib/libmali.so.1.9.0 ] && ! mount | grep -q "on /lib/libmali.so.1.9.0 "; then
         mount -o bind "$source_lib" /lib/libmali.so.1.9.0
         LIBMALI_BIND_MOUNTED=1
+        echo "PMI_DIAG flip_libmali_bound=/lib/libmali.so.1.9.0"
     fi
 
     if [ -f /usr/lib/libmali.so.1.9.0 ] && ! mount | grep -q "on /usr/lib/libmali.so.1.9.0 "; then
         mount -o bind "$source_lib" /usr/lib/libmali.so.1.9.0
         LIBMALI_BIND_MOUNTED=1
+        echo "PMI_DIAG flip_libmali_bound=/usr/lib/libmali.so.1.9.0"
     fi
 
     return 0

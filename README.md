@@ -54,6 +54,9 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 - After installation, go to **Ports** and launch **Portmaster** to browse and install ports.
 - Installed ports will appear under the **Ports** section in NextUI.
 
+> [!WARNING]
+> The first time you launch **Portmaster** from the **Ports** section in NextUI, it can take up to a minute to start. Please wait for the initial setup to finish before assuming it has stalled.
+
 > [!TIP]
 > Not all ports are ready to run immediately after installation, and some still require files from a purchased copy of the game. Please refer to the port documentation on the [PortMaster](https://portmaster.games/games.html) website for setup instructions.
 
