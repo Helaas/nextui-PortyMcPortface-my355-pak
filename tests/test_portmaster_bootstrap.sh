@@ -5,15 +5,29 @@ create_common_tree() {
 	root="$1"
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
+	shim_bin="$root/test-bin"
 	xdg_data_home="$root/home/.local/share"
 	temp_data_dir="$root/.ports_temp"
 	log_file="$root/PORTS.txt"
 
 	mkdir -p "$pak_dir/files" "$pak_dir/bin" "$pak_dir/lib" "$emu_dir/pylibs/harbourmaster" \
-		"$emu_dir/miyoo" "$xdg_data_home/PortMaster" "$temp_data_dir"
+		"$emu_dir/miyoo" "$xdg_data_home/PortMaster" "$temp_data_dir" "$shim_bin"
 	cp payload/PORTS.pak/Portmaster.sh "$pak_dir/Portmaster.sh"
 	printf '#!/bin/sh\nexit 0\n' >"$pak_dir/bin/python3"
 	chmod +x "$pak_dir/bin/python3"
+	cat >"$shim_bin/sed" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = "-i" ]; then
+	shift
+	if /usr/bin/sed --version >/dev/null 2>&1; then
+		exec /usr/bin/sed -i "$@"
+	else
+		exec /usr/bin/sed -i '' "$@"
+	fi
+fi
+exec /usr/bin/sed "$@"
+EOF
+	chmod +x "$shim_bin/sed"
 
 	cat >"$pak_dir/files/control.txt" <<EOF
 #!/bin/bash
@@ -44,6 +58,10 @@ EOF
 HM_TOOLS_DIR=None
 EOF
 
+	cat >"$pak_dir/files/config.json" <<'EOF'
+{}
+EOF
+
 	cat >"$pak_dir/files/gamecontrollerdb.txt" <<'EOF'
 03000000de2800000112000001000000,Steam Controller,a:b0,b:b1,start:b7,platform:Linux,
 EOF
@@ -62,6 +80,7 @@ run_overlay_sync() {
 	root="$1"
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
+	shim_bin="$root/test-bin"
 	xdg_data_home="$root/home/.local/share"
 	temp_data_dir="$root/.ports_temp"
 	log_file="$root/PORTS.txt"
@@ -71,6 +90,7 @@ run_overlay_sync() {
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
+	PATH="$shim_bin:$PATH" \
 	PMI_TEST_MODE=overlay-sync \
 	bash "$pak_dir/Portmaster.sh"
 }
@@ -109,7 +129,9 @@ EOF
 	cat >"$real_ports_dir/TestPort.sh" <<EOF
 #!/usr/bin/env bash
 set -eu
-cat "\$PMI_JOY_TYPE_NODE" >"$temp_data_dir/joy_type_during.txt"
+if [ -n "\${PMI_JOY_TYPE_NODE:-}" ]; then
+	cat "\$PMI_JOY_TYPE_NODE" >"$temp_data_dir/joy_type_during.txt"
+fi
 EOF
 	chmod +x "$real_ports_dir/TestPort.sh"
 }
@@ -118,6 +140,7 @@ run_direct_launch() {
 	root="$1"
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
+	shim_bin="$root/test-bin"
 	xdg_data_home="$root/home/.local/share"
 	temp_data_dir="$root/.ports_temp"
 	log_file="$root/PORTS.txt"
@@ -130,6 +153,7 @@ run_direct_launch() {
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
+	PATH="$shim_bin:$PATH" \
 	bash "$pak_dir/Portmaster.sh"
 }
 
@@ -140,18 +164,16 @@ joy_passthrough_root="$(mktemp -d)"
 joy_readonly_root="$(mktemp -d)"
 trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root"' EXIT
 
-create_common_tree "$failure_root"
+create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
-if run_overlay_sync "$failure_root"; then
+if run_direct_launch "$failure_root"; then
 	exit 1
 fi
 test ! -f "$failure_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp"
 test ! -e "$failure_root/Emus/my355/PORTS.pak/lib/libtheoradec.so.1"
 
-create_common_tree "$success_root"
-write_success_lib_bundle "$success_root"
-
-run_overlay_sync "$success_root"
+create_direct_launch_tree "$success_root"
+run_direct_launch "$success_root"
 test -f "$success_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp"
 test -d "$success_root/Emus/my355/PORTS.pak/lib/python3.11"
 test -f "$success_root/Emus/my355/PORTS.pak/lib/python3.11/module.py"
