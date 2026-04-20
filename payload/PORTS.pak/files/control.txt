@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# Adapted from Spruce PortMaster control.txt for NextUI PORTS.pak layout.
+#
+
+CUR_TTY=/dev/null
+
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+runtime_root="$PM_RUNTIME_ROOT"
+export controlfolder="$runtime_root"
+
+export directory="$TEMP_DATA_DIR"
+export PATH="${runtime_root%/PortMaster}/bin:$PATH"
+export LD_LIBRARY_PATH="${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+export ESUDO=""
+export ESUDOKILL="-1"
+export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+
+get_controls() {
+  LOWRES="N"
+  ANALOGSTICKS="${ANALOG_STICKS:-0}"
+}
+
+source "$controlfolder/device_info.txt"
+source "$controlfolder/funcs.txt"
+
+export GPTOKEYB2="$ESUDO env LD_PRELOAD=$controlfolder/libinterpose.${DEVICE_ARCH}.so $controlfolder/gptokeyb2 $ESUDOKILL"
+export GPTOKEYB="$ESUDO $controlfolder/gptokeyb $ESUDOKILL"

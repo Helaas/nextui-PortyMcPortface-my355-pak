@@ -1,0 +1,94 @@
+SHELL := /bin/bash
+
+APP_NAME := porty-mcportface
+PAK_NAME := Porty McPortface
+RELEASE_BASENAME := Porty-McPortface
+APOSTROPHE_DIR := third_party/apostrophe
+BUILD_DIR := build
+DIST_DIR := $(BUILD_DIR)/release
+STAGING_DIR := $(BUILD_DIR)/staging
+SRC_FILES := $(shell find src -name '*.c' -print | sort)
+
+MY355_TOOLCHAIN := ghcr.io/loveretro/my355-toolchain:latest
+COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -I./src -I./third_party/jsmn
+
+.PHONY: mac run-mac my355 package clean test-native refresh-portmaster-lib-bundle
+
+mac:
+	@mkdir -p $(BUILD_DIR)/mac
+	cc -std=gnu11 -O0 -g \
+		-DPLATFORM_MAC \
+		$(COMMON_INCLUDES) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(BUILD_DIR)/mac/$(APP_NAME) \
+		$(SRC_FILES) \
+		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
+		-lm -lpthread
+
+run-mac: mac
+	./$(BUILD_DIR)/mac/$(APP_NAME)
+
+my355:
+	@mkdir -p $(BUILD_DIR)/my355
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		$(MY355_TOOLCHAIN) \
+		make -C /workspace -f ports/my355/Makefile BUILD_DIR=/workspace/$(BUILD_DIR)/my355
+
+build/my355/7zzs:
+	@mkdir -p build/my355
+	sh scripts/build-7zz-from-source.sh $(CURDIR)/build/my355
+
+build/runtime-bin/.stamp: tools/pm-artwork-convert.c scripts/build-box64-from-source.sh scripts/fetch-box64-runtime-libs.sh third_party/stb/stb_image.h third_party/stb/stb_image_write.h
+	@rm -rf build/runtime-bin
+	@mkdir -p build/runtime-bin
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		-w /workspace \
+		$(MY355_TOOLCHAIN) \
+		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && sh /workspace/scripts/build-box64-from-source.sh /workspace/build/runtime-bin'
+	sh scripts/fetch-box64-runtime-libs.sh "$(CURDIR)/build/runtime-bin"
+	@touch $@
+
+build/my355/runtime-bin/.stamp: build/runtime-bin/.stamp
+	@rm -rf build/my355/runtime-bin
+	@mkdir -p build/my355/runtime-bin
+	cp -R build/runtime-bin/. build/my355/runtime-bin/
+	@touch $@
+
+test-native:
+	@mkdir -p $(BUILD_DIR)/tests
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_platform.c src/platform.c -o $(BUILD_DIR)/tests/test_platform
+	./$(BUILD_DIR)/tests/test_platform
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_json.c src/json.c -o $(BUILD_DIR)/tests/test_json
+	./$(BUILD_DIR)/tests/test_json
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_status.c src/status.c -o $(BUILD_DIR)/tests/test_status
+	./$(BUILD_DIR)/tests/test_status
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_consent.c src/consent.c src/fs.c -o $(BUILD_DIR)/tests/test_consent
+	./$(BUILD_DIR)/tests/test_consent
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_updater_flow.c src/updater_flow.c -o $(BUILD_DIR)/tests/test_updater_flow
+	./$(BUILD_DIR)/tests/test_updater_flow
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_install.c src/install.c src/fs.c src/http.c src/json.c src/process.c -o $(BUILD_DIR)/tests/test_install
+	./$(BUILD_DIR)/tests/test_install
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_payload_exists.c -o $(BUILD_DIR)/tests/test_payload_exists
+	./$(BUILD_DIR)/tests/test_payload_exists
+	sh tests/test_portmaster_overlay.sh
+	sh tests/test_portmaster_bootstrap.sh
+
+refresh-portmaster-lib-bundle:
+	sh scripts/rebuild-portmaster-lib-bundle.sh
+
+package: my355 build/my355/7zzs build/my355/runtime-bin/.stamp
+	@rm -rf $(STAGING_DIR)
+	@mkdir -p "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/resources/bin"
+	@mkdir -p "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/resources/runtime-bin/my355"
+	cp "$(BUILD_DIR)/my355/$(APP_NAME)" "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/"
+	cp launch.sh pak.json "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/"
+	cp -R payload "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/"
+	cp "$(BUILD_DIR)/my355/7zzs" "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/resources/bin/7zzs"
+	cp -R "$(BUILD_DIR)/my355/runtime-bin/." "$(STAGING_DIR)/Tools/my355/$(PAK_NAME).pak/resources/runtime-bin/my355/"
+	@mkdir -p $(DIST_DIR)/all
+	cd $(STAGING_DIR) && zip -9 -r "$(CURDIR)/$(DIST_DIR)/all/$(RELEASE_BASENAME).pakz" . -x '.*'
+
+clean:
+	rm -rf $(BUILD_DIR)

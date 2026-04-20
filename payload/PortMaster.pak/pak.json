@@ -1,0 +1,9 @@
+{
+  "name": "PortMaster",
+  "version": "v0.1.0",
+  "type": "TOOL",
+  "description": "Launch the installed PortMaster runtime from Tools.",
+  "author": "kevinvranken",
+  "repo_url": "https://github.com/kevinvranken/nextui-portmaster-pak",
+  "launch": "launch.sh"
+}

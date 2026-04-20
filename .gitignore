@@ -1,0 +1,11 @@
+build/
+Installer.pak/
+.worktrees/
+
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
