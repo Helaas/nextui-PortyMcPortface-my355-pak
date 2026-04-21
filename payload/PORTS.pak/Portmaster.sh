@@ -526,6 +526,83 @@ EOF
     chmod +x "$wrapper_path" 2>/dev/null || true
 }
 
+write_armhf_exec_compat_wrapper() {
+    local wrapper_path="$1"
+    local wrapper_dir wrapper_name original_path
+
+    wrapper_dir=$(dirname "$wrapper_path")
+    wrapper_name=$(basename "$wrapper_path")
+    original_path="$wrapper_dir/${wrapper_name}.original"
+
+    if [ ! -f "$original_path" ]; then
+        mv "$wrapper_path" "$original_path"
+    fi
+
+    cat >"$wrapper_path" <<'EOF'
+#!/bin/sh
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF_NAME=$(basename -- "$0")
+PAK_DIR="${PAK_DIR:-}"
+TEMP_DATA_DIR="${TEMP_DATA_DIR:-$PAK_DIR/.ports_temp}"
+SPRUCE_ARMHF_ROOTFS_MOUNT="$TEMP_DATA_DIR/spruceflip-rootfs"
+SPRUCE_ARMHF_ROOTFS_IMAGE="$PAK_DIR/runtime/armhf/miyoo355_rootfs_32.img"
+SPRUCE_ARMHF_ROOTFS_PARTAA="$PAK_DIR/runtime/armhf/miyoo355_rootfs_32.img_partaa"
+SPRUCE_ARMHF_ROOTFS_PARTAB="$PAK_DIR/runtime/armhf/miyoo355_rootfs_32.img_partab"
+SPRUCE_ARMHF_ROOTFS_PARTAC="$PAK_DIR/runtime/armhf/miyoo355_rootfs_32.img_partac"
+REAL_BINARY="$SELF_DIR/${SELF_NAME}.original"
+
+if [ -n "$PAK_DIR" ] && { [ -f "$SPRUCE_ARMHF_ROOTFS_IMAGE" ] || [ -f "$SPRUCE_ARMHF_ROOTFS_PARTAA" ]; }; then
+    mkdir -p "$SPRUCE_ARMHF_ROOTFS_MOUNT"
+    if [ ! -f "$SPRUCE_ARMHF_ROOTFS_IMAGE" ] && [ -f "$SPRUCE_ARMHF_ROOTFS_PARTAA" ] && [ -f "$SPRUCE_ARMHF_ROOTFS_PARTAB" ] && [ -f "$SPRUCE_ARMHF_ROOTFS_PARTAC" ]; then
+        cat "$SPRUCE_ARMHF_ROOTFS_PARTAA" "$SPRUCE_ARMHF_ROOTFS_PARTAB" "$SPRUCE_ARMHF_ROOTFS_PARTAC" > "$SPRUCE_ARMHF_ROOTFS_IMAGE.tmp"
+        mv "$SPRUCE_ARMHF_ROOTFS_IMAGE.tmp" "$SPRUCE_ARMHF_ROOTFS_IMAGE"
+    fi
+    if [ -f "$SPRUCE_ARMHF_ROOTFS_IMAGE" ] && ! mount | grep -q "on $SPRUCE_ARMHF_ROOTFS_MOUNT "; then
+        mount -t squashfs "$SPRUCE_ARMHF_ROOTFS_IMAGE" "$SPRUCE_ARMHF_ROOTFS_MOUNT" >/dev/null 2>&1 || true
+    fi
+fi
+
+ARMHF_ROOT="$SPRUCE_ARMHF_ROOTFS_MOUNT"
+ARMHF_LIB_PATH="$ARMHF_ROOT/usr/lib"
+ARMHF_LOADER="$ARMHF_ROOT/usr/lib/ld-linux-armhf.so.3"
+ARMHF_EXTRA_LIB_PATH="$PAK_DIR/runtime/armhf/lib"
+ARMHF_PORT_LIB_PATH=""
+OLD_IFS="$IFS"
+IFS=':'
+for path_entry in ${LD_LIBRARY_PATH:-}; do
+    case "$path_entry" in
+        "$SELF_DIR"|"$SELF_DIR"/*)
+            if [ -n "$ARMHF_PORT_LIB_PATH" ]; then
+                ARMHF_PORT_LIB_PATH="$ARMHF_PORT_LIB_PATH:$path_entry"
+            else
+                ARMHF_PORT_LIB_PATH="$path_entry"
+            fi
+            ;;
+    esac
+done
+IFS="$OLD_IFS"
+if [ -d "$ARMHF_EXTRA_LIB_PATH" ]; then
+    if [ -n "$ARMHF_PORT_LIB_PATH" ]; then
+        ARMHF_PORT_LIB_PATH="$ARMHF_EXTRA_LIB_PATH:$ARMHF_PORT_LIB_PATH"
+    else
+        ARMHF_PORT_LIB_PATH="$ARMHF_EXTRA_LIB_PATH"
+    fi
+fi
+ARMHF_EFFECTIVE_LD_LIBRARY_PATH="$ARMHF_LIB_PATH${ARMHF_PORT_LIB_PATH:+:$ARMHF_PORT_LIB_PATH}"
+export LD_LIBRARY_PATH="$ARMHF_EFFECTIVE_LD_LIBRARY_PATH"
+
+if [ -z "$PAK_DIR" ] || [ ! -x "$REAL_BINARY" ] || [ ! -f "$ARMHF_LOADER" ]; then
+    echo "FATAL: missing armhf compatibility runtime" >&2
+    exit 1
+fi
+
+exec "$ARMHF_LOADER" --library-path "$ARMHF_EFFECTIVE_LD_LIBRARY_PATH" "$REAL_BINARY" "$@"
+EOF
+    chmod +x "$wrapper_path" 2>/dev/null || true
+}
+
 refresh_box_runtime_wrappers() {
     local search_path="$1"
     local file
@@ -542,6 +619,18 @@ refresh_box_runtime_wrappers() {
                 write_box64_wrapper "$file"
                 ;;
         esac
+    done
+}
+
+refresh_armhf_binary_wrappers() {
+    local search_path="$1"
+    local file
+
+    [ -d "$search_path" ] || return 0
+
+    find "$search_path" -type f -name 'gmloader' | while IFS= read -r file || [ -n "$file" ]; do
+        [ -n "$file" ] || continue
+        write_armhf_exec_compat_wrapper "$file"
     done
 }
 
@@ -680,6 +769,7 @@ post_gui_rewrites() {
     heal_installed_port_launchers
     apply_port_arch_rewrites
     refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
+    refresh_armhf_binary_wrappers "$REAL_PORTS_DIR"
     process_squashfs_files "$REAL_PORTS_DIR"
     copy_game_scripts
     copy_artwork_to_media
@@ -710,6 +800,7 @@ launch_port_script() {
     heal_installed_port_launchers
     apply_port_arch_rewrites
     refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
+    refresh_armhf_binary_wrappers "$REAL_PORTS_DIR"
     script_to_run=$(stage_launch_script "$source_script")
     echo "PMI_DIAG selected_port_script=$source_script"
     echo "PMI_DIAG rewritten_launch_path=$script_to_run"

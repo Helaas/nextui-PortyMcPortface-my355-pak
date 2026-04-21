@@ -54,7 +54,56 @@ int main(void) {
     assert(write_text_file(file_path,
         "#!/usr/bin/env python3\n"
         "def portmaster_check_update(pm, config, temp_dir):\n"
-        "    print('updating')\n") == 0);
+        "    print('updating')\n"
+        "\n"
+        "class HarbourMaster:\n"
+        "    pass\n"
+        "\n"
+        "class PortMasterGUI:\n"
+        "    def __init__(self):\n"
+        "        self.hm = None\n"
+        "        self.images = None\n"
+        "        self.text_data = {}\n"
+        "        self.changed_keys = set()\n"
+        "        self.timers = None\n"
+        "        self.dir_scanner = None\n"
+        "\n"
+        "    def set_data(self, key, value):\n"
+        "        self.text_data[key] = value\n"
+        "        self.changed_keys.add(key)\n"
+        "\n"
+        "    def get_port_image(self, port_name):\n"
+        "        image = None\n"
+        "        if self.hm is not None:\n"
+        "            image = self.hm.port_images(port_name)\n"
+        "\n"
+        "            if image is not None:\n"
+        "                image = image.get('screenshot', None)\n"
+        "\n"
+        "        if image is None:\n"
+        "            image = \"NO_IMAGE\"\n"
+        "\n"
+        "        return image\n"
+        "\n"
+        "    def set_port_info(self, port_name, port_info, want_install_size=False):\n"
+        "        return None\n"
+        "\n"
+        "    def do_update(self):\n"
+        "        # Update scanning\n"
+        "        if self.timers.elapsed('dir_scan_interval', 500, run_first=True):\n"
+        "            self.dir_scanner.iterate(30)\n"
+        "\n"
+        "        ## Check for any keys changed in our template system.\n"
+        "        if len(self.changed_keys):\n"
+        "            self.changed_keys.clear()\n"
+        "\n"
+        "def create_pm(config, temp_dir, argv):\n"
+        "    pm = PortMasterGUI()\n"
+        "    if len(argv) > 1 and argv[1] == 'fifo_control':\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n"
+        "    with pm.enable_cancellable(False):\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/harbourmaster/platform.py", stage_root);
     assert(write_text_file(file_path,
         "import os\n"
@@ -107,6 +156,20 @@ int main(void) {
         "}\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/pySDL2gui.py", stage_root);
     assert(write_text_file(file_path,
+        "import os\n"
+        "from pathlib import Path\n"
+        "\n"
+        "class Image:\n"
+        "    pass\n"
+        "\n"
+        "class ImageManager:\n"
+        "    def __init__(self, gui, max_images=None):\n"
+        "        self.gui = gui\n"
+        "        self.renderer = gui.renderer\n"
+        "        self.images = {}\n"
+        "        self.textures = {}\n"
+        "        self.cache = []\n"
+        "\n"
         "    def load(self, filename):\n"
         "        if filename in self.cache:\n"
         "            return self.images[filename]\n"
@@ -339,6 +402,14 @@ int main(void) {
     assert(strstr(file_content, "ARMHF_LOADER=\"$ARMHF_ROOT/usr/lib/ld-linux-armhf.so.3\"") != NULL);
     assert(strstr(file_content, "export BOX86_LD_LIBRARY_PATH=\"$ARMHF_LIB_PATH${BOX86_LD_LIBRARY_PATH:+:$BOX86_LD_LIBRARY_PATH}\"") != NULL);
     assert(strstr(file_content, "exec \"$ARMHF_LOADER\" --library-path \"$ARMHF_LIB_PATH\" \"$REAL_BOX86\" \"$@\"") != NULL);
+    assert(strstr(file_content, "write_armhf_exec_compat_wrapper()") != NULL);
+    assert(strstr(file_content, "original_path=\"$wrapper_dir/${wrapper_name}.original\"") != NULL);
+    assert(strstr(file_content, "REAL_BINARY=\"$SELF_DIR/${SELF_NAME}.original\"") != NULL);
+    assert(strstr(file_content, "ARMHF_EXTRA_LIB_PATH=\"$PAK_DIR/runtime/armhf/lib\"") != NULL);
+    assert(strstr(file_content, "for path_entry in ${LD_LIBRARY_PATH:-}; do") != NULL);
+    assert(strstr(file_content, "\"$SELF_DIR\"|\"$SELF_DIR\"/*)") != NULL);
+    assert(strstr(file_content, "ARMHF_EFFECTIVE_LD_LIBRARY_PATH=\"$ARMHF_LIB_PATH${ARMHF_PORT_LIB_PATH:+:$ARMHF_PORT_LIB_PATH}\"") != NULL);
+    assert(strstr(file_content, "exec \"$ARMHF_LOADER\" --library-path \"$ARMHF_EFFECTIVE_LD_LIBRARY_PATH\" \"$REAL_BINARY\" \"$@\"") != NULL);
     assert(strstr(file_content, "self_pid=\"$$\"") != NULL);
     assert(strstr(file_content, "pgrep -f \"$pattern\" | while IFS= read -r pid || [ -n \"$pid\" ]; do") != NULL);
     assert(strstr(file_content, "[ \"$pid\" = \"$self_pid\" ] && continue") != NULL);
@@ -374,6 +445,9 @@ int main(void) {
     assert(strstr(file_content, "find \"$search_path\" -type f \\( -path '*/box86/box86' -o -path '*/box64/box64' \\)") != NULL);
     assert(strstr(file_content, "write_box86_compat_wrapper \"$file\"") != NULL);
     assert(strstr(file_content, "write_box64_wrapper \"$file\"") != NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers()") != NULL);
+    assert(strstr(file_content, "find \"$search_path\" -type f -name 'gmloader'") != NULL);
+    assert(strstr(file_content, "write_armhf_exec_compat_wrapper \"$file\"") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs()") != NULL);
     assert(strstr(file_content, "local runtime_dir=\"$PAK_DIR/lib/box64-i386-linux-gnu\"") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type d -path '*/gamedata/*/32/lib'") != NULL);
@@ -390,6 +464,7 @@ int main(void) {
     assert(strstr(file_content, "systemctl >/dev/null 2>\\&1; then $ESUDO systemctl restart oga_events \\& fi") != NULL);
     assert(strstr(file_content, "local source_script=\"${PMI_PORT_SCRIPT:-$ROM_PATH}\"") != NULL);
     assert(strstr(file_content, "apply_port_arch_rewrites") != NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers \"$REAL_PORTS_DIR\"") != NULL);
     assert(strstr(file_content, "if launcher_requires_armhf \"$source_script\"; then") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs \"$REAL_PORTS_DIR\"") != NULL);
     assert(strstr(file_content, "bind_flip_libmali") != NULL);
@@ -435,20 +510,31 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pugwash", payload_dir);
     assert(read_text_file_alloc(file_path, &file_content, &file_len) == 0);
     assert(strstr(file_content, "def portmaster_check_update(pm, config, temp_dir):\n    return False\n") != NULL);
+    assert(strstr(file_content, "def start_artwork_warmup(self):") != NULL);
+    assert(strstr(file_content, "self.images.warmup_jpeg_directory(images_dir)") != NULL);
+    assert(strstr(file_content, "def poll_artwork_cache_updates(self):") != NULL);
+    assert(strstr(file_content, "completed = self.images.poll_completed_jpegs()") != NULL);
+    assert(strstr(file_content, "pm.start_artwork_warmup()") != NULL);
+    assert(strstr(file_content, "self.poll_artwork_cache_updates()") != NULL);
     free(file_content);
     file_content = NULL;
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/pySDL2gui.py", payload_dir);
     assert(read_text_file_alloc(file_path, &file_content, &file_len) == 0);
     assert(strstr(file_content, "def resolve_image_path(self, res_filename):") != NULL);
-    assert(strstr(file_content, "res_path = os.fspath(res_filename)") != NULL);
-    assert(strstr(file_content, "converter = os.environ.get(\"PMI_ARTWORK_CONVERTER\", \"pm-artwork-convert\")") != NULL);
-    assert(strstr(file_content, "cached_name = f\"{res_path}.pm.png\"") != NULL);
-    assert(strstr(file_content, "subprocess.run([converter, res_path, cached_name], check=True,") != NULL);
+    assert(strstr(file_content, "self.jpeg_cache_root = Path(os.environ.get(\"XDG_CACHE_HOME\", str(Path.home() / \".cache\"))) / \"PortMaster\" / \"jpeg-cache\"") != NULL);
+    assert(strstr(file_content, "self.jpeg_high_priority = queue.Queue()") != NULL);
+    assert(strstr(file_content, "def _queue_jpeg_conversion(self, source_path, *, high_priority):") != NULL);
+    assert(strstr(file_content, "def warmup_jpeg_directory(self, directory):") != NULL);
+    assert(strstr(file_content, "def poll_completed_jpegs(self):") != NULL);
+    assert(strstr(file_content, "self._queue_jpeg_conversion(source_path, high_priority=True)") != NULL);
+    assert(strstr(file_content, "return str(cached_path)") != NULL);
     assert(strstr(file_content, "res_filename = self.resolve_image_path(res_filename)") != NULL);
     assert(strstr(file_content, "return self.images.get(\"NO_IMAGE\", None)") != NULL);
     assert(strstr(file_content, "except Exception:\n                if filename != \"NO_IMAGE\":") != NULL);
     assert(strstr(file_content, "except Exception:\n            stored_name = data.get(\"name\", file_name)") != NULL);
+    assert(strstr(file_content, "cached_name = f\"{res_path}.pm.png\"") == NULL);
+    assert(strstr(file_content, "subprocess.run([converter, res_path, cached_name], check=True,") == NULL);
     free(file_content);
     file_content = NULL;
 

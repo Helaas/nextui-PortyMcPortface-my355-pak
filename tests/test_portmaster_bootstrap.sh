@@ -114,11 +114,12 @@ create_direct_launch_tree() {
 	root="$1"
 	rom_dir="$root/Roms/Ports (PORTS)"
 	real_ports_dir="$rom_dir/.ports"
+	port_dir="$real_ports_dir/testport"
 	temp_data_dir="$root/.ports_temp"
 
 	create_common_tree "$root"
 	write_success_lib_bundle "$root"
-	mkdir -p "$rom_dir" "$real_ports_dir"
+	mkdir -p "$rom_dir" "$real_ports_dir" "$port_dir"
 
 	cat >"$rom_dir/TestPort.sh" <<'EOF'
 #!/bin/sh
@@ -134,6 +135,24 @@ if [ -n "\${PMI_JOY_TYPE_NODE:-}" ]; then
 fi
 EOF
 	chmod +x "$real_ports_dir/TestPort.sh"
+
+	cat >"$port_dir/port.json" <<'EOF'
+{
+  "attr": {
+    "arch": ["armhf"]
+  },
+  "files": {
+    "TestPort.sh": "TestPort.sh",
+    "testport/": "testport/"
+  }
+}
+EOF
+
+	cat >"$port_dir/gmloader" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+	chmod +x "$port_dir/gmloader"
 }
 
 run_direct_launch() {
@@ -183,6 +202,9 @@ test ! -f "$success_root/Emus/my355/PORTS.pak/lib/libpulse-simple.so.0"
 test ! -f "$success_root/Emus/my355/PORTS.pak/lib/libpulsecommon-13.99.so"
 test ! -f "$success_root/Emus/my355/PORTS.pak/lib/._junk"
 test ! -f "$success_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader.original"
+grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
 
 create_direct_launch_tree "$joy_override_root"
 printf '0 [-1=none 0=miyoo 1=xbox]\n' >"$joy_override_root/joy_type"
