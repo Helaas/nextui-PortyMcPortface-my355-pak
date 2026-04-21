@@ -484,7 +484,12 @@ int main(void) {
     assert(strstr(file_content, "strings \"$file\" 2>/dev/null | grep -qx 'SDL_CreateWindow'; then") != NULL);
     assert(strstr(file_content, "write_sdl_compat_check_cache \"$cache_path\" \"skip\"") != NULL);
     assert(strstr(file_content, "find \"$port_dir/lib\" -maxdepth 2 -type f") != NULL);
-    assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -perm -111") != NULL);
+    assert(strstr(file_content, "is_probe_cache_artifact()") != NULL);
+    assert(strstr(file_content, "is_aarch64_launch_probe_candidate()") != NULL);
+    assert(strstr(file_content, "printf '%s/.pmi-aarch64-elf64-candidates\\n' \"$port_dir\"") != NULL);
+    assert(strstr(file_content, "cleanup_port_probe_artifacts()") != NULL);
+    assert(strstr(file_content, "list_port_aarch64_launch_probe_candidates()") != NULL);
+    assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -newer \"$cache_path\"") != NULL);
     assert(strstr(file_content, "local source_lib=\"$PAK_DIR/files/libmali-g2p0.so.1.9.0\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_WARN flip_libmali_missing=$source_lib\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG flip_libmali_bound=/usr/lib/libmali.so.1.9.0\"") != NULL);
@@ -503,8 +508,9 @@ int main(void) {
     assert(strstr(file_content, "refresh_armhf_binary_wrappers()") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type f -name 'gmloader'") != NULL);
     assert(strstr(file_content, "write_armhf_exec_compat_wrapper \"$file\"") != NULL);
-    assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -perm -111") != NULL);
-    assert(strstr(file_content, "if ! is_aarch64_sdl_compat_wrapper \"$file\" && ! is_elf64_file \"$file\"; then") == NULL);
+    assert(strstr(file_content, "cleanup_port_probe_artifacts \"$port_dir\"") != NULL);
+    assert(strstr(file_content, "list_port_aarch64_launch_probe_candidates \"$port_dir\" | while IFS= read -r file || [ -n \"$file\" ]; do") != NULL);
+    assert(strstr(file_content, "if ! is_aarch64_launch_probe_candidate \"$binary_path\"; then") != NULL);
     assert(strstr(file_content, "maybe_refresh_aarch64_sdl_compat_binary \"$file\"") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs()") != NULL);
     assert(strstr(file_content, "local runtime_dir=\"$PAK_DIR/lib/box64-i386-linux-gnu\"") != NULL);

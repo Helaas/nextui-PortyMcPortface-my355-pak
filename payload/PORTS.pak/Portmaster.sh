@@ -540,13 +540,8 @@ launcher_requires_system_gl_stack() {
             return 1
         fi
 
-        if find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        if list_port_aarch64_launch_probe_candidates "$port_dir" | while IFS= read -r file || [ -n "$file" ]; do
             [ -n "$file" ] || continue
-            case "$file" in
-                *.sh|*.bash|*.so|*.so.*|*.original)
-                    continue
-                    ;;
-            esac
             if is_aarch64_sdl_compat_wrapper "$file"; then
                 continue
             fi
@@ -809,6 +804,106 @@ is_elf64_file() {
     [ "$header" = "7f454c4602" ]
 }
 
+is_probe_cache_artifact() {
+    local file="$1"
+
+    case "$file" in
+        *.pmi-aarch64-sdl-compat|*.pmi-system-gl-windowing|*.pmi-aarch64-elf64-candidates)
+            return 0
+            ;;
+        *.pmi-aarch64-sdl-compat.*|*.pmi-system-gl-windowing.*|*.pmi-aarch64-elf64-candidates.*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+is_aarch64_launch_probe_candidate() {
+    local file="$1"
+
+    [ -f "$file" ] || return 1
+
+    case "$file" in
+        *.sh|*.bash|*.so|*.so.*|*.original)
+            return 1
+            ;;
+    esac
+
+    if is_probe_cache_artifact "$file"; then
+        return 1
+    fi
+
+    if is_aarch64_sdl_compat_wrapper "$file"; then
+        return 0
+    fi
+
+    is_elf64_file "$file"
+}
+
+aarch64_elf64_candidate_cache_path() {
+    local port_dir="$1"
+
+    printf '%s/.pmi-aarch64-elf64-candidates\n' "$port_dir"
+}
+
+cleanup_port_probe_artifacts() {
+    local port_dir="$1"
+    local cache_file base_file
+
+    [ -d "$port_dir" ] || return 0
+
+    find "$port_dir" -type f \
+        \( -name '*.pmi-aarch64-sdl-compat*' -o -name '*.pmi-system-gl-windowing*' \) |
+        while IFS= read -r cache_file || [ -n "$cache_file" ]; do
+            [ -n "$cache_file" ] || continue
+
+            case "$cache_file" in
+                *.pmi-aarch64-sdl-compat)
+                    base_file="${cache_file%.pmi-aarch64-sdl-compat}"
+                    ;;
+                *.pmi-system-gl-windowing)
+                    base_file="${cache_file%.pmi-system-gl-windowing}"
+                    ;;
+                *)
+                    rm -f "$cache_file"
+                    continue
+                    ;;
+            esac
+
+            if [ ! -f "$base_file" ] || ! is_aarch64_launch_probe_candidate "$base_file"; then
+                rm -f "$cache_file"
+            fi
+        done
+}
+
+list_port_aarch64_launch_probe_candidates() {
+    local port_dir="$1"
+    local cache_path tmp_cache cache_source file
+
+    [ -d "$port_dir" ] || return 0
+
+    cache_path=$(aarch64_elf64_candidate_cache_path "$port_dir")
+    cache_source="${PAK_DIR:-}/Portmaster.sh"
+    if [ -f "$cache_path" ] &&
+       ! find "$port_dir" -maxdepth 2 -type f -newer "$cache_path" | grep -q . &&
+       { [ -z "$cache_source" ] || [ ! -e "$cache_source" ] || ! [ "$cache_source" -nt "$cache_path" ]; }; then
+        cat "$cache_path"
+        return 0
+    fi
+
+    tmp_cache="${cache_path}.tmp.$$"
+    : >"$tmp_cache"
+    find "$port_dir" -maxdepth 2 -type f | while IFS= read -r file || [ -n "$file" ]; do
+        [ -n "$file" ] || continue
+        if is_aarch64_launch_probe_candidate "$file"; then
+            printf '%s\n' "$file" >>"$tmp_cache"
+        fi
+    done
+    mv -f "$tmp_cache" "$cache_path"
+    cat "$cache_path"
+}
+
 binary_requires_sdl_default_audio_info_fallback() {
     local file="$1"
 
@@ -918,18 +1013,14 @@ maybe_refresh_aarch64_sdl_compat_binary() {
 
     [ -f "$binary_path" ] || return 0
 
-    case "$binary_path" in
-        *.sh|*.bash|*.so|*.so.*|*.original)
-            if is_aarch64_sdl_compat_wrapper "$binary_path"; then
-                restore_aarch64_sdl_compat_wrapper "$binary_path"
-            fi
-            return 0
-            ;;
-    esac
-
     if is_aarch64_sdl_compat_wrapper "$binary_path"; then
         inspect_path="${binary_path}.original"
         [ -f "$inspect_path" ] || return 0
+    fi
+
+    if ! is_aarch64_launch_probe_candidate "$binary_path"; then
+        restore_aarch64_sdl_compat_wrapper "$binary_path"
+        return 0
     fi
 
     if default_sdl2_has_default_audio_info_symbol; then
@@ -966,13 +1057,9 @@ refresh_aarch64_sdl_compat_wrappers() {
         fi
 
         port_dir=$(dirname "$port_json")
-        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        cleanup_port_probe_artifacts "$port_dir"
+        list_port_aarch64_launch_probe_candidates "$port_dir" | while IFS= read -r file || [ -n "$file" ]; do
             [ -n "$file" ] || continue
-            case "$file" in
-                *.sh|*.bash|*.so|*.so.*|*.original)
-                    continue
-                    ;;
-            esac
             maybe_refresh_aarch64_sdl_compat_binary "$file"
         done
     done
@@ -996,13 +1083,9 @@ refresh_aarch64_sdl_compat_for_launcher() {
         fi
 
         port_dir=$(dirname "$port_json")
-        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        cleanup_port_probe_artifacts "$port_dir"
+        list_port_aarch64_launch_probe_candidates "$port_dir" | while IFS= read -r file || [ -n "$file" ]; do
             [ -n "$file" ] || continue
-            case "$file" in
-                *.sh|*.bash|*.so|*.so.*|*.original)
-                    continue
-                    ;;
-            esac
             maybe_refresh_aarch64_sdl_compat_binary "$file"
         done
         return 0

@@ -261,6 +261,8 @@ EOF
 echo SDL_GetDefaultAudioInfo >/dev/null
 EOF
 	chmod +x "$port_dir/not-elf"
+	printf 'skip\n' >"$port_dir/not-elf.pmi-aarch64-sdl-compat"
+	printf 'skip\n' >"$port_dir/not-elf.pmi-aarch64-sdl-compat.pmi-aarch64-sdl-compat"
 
 	printf '\177ELF\002stub\nSomeOtherSymbol\n' >"$port_dir/no-sdl"
 	chmod +x "$port_dir/no-sdl"
@@ -383,14 +385,15 @@ test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.orig
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.original"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.pmi-aarch64-sdl-compat"
-test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
+test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
+test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat.pmi-aarch64-sdl-compat"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.pmi-aarch64-sdl-compat"
-test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "5"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
 grep -q "PMI_DIAG aarch64_sdl_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl" "$aarch64_wrap_root/PORTS.txt"
 PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
 PMI_TEST_SDL_COMPAT_CHECK_LOG="$aarch64_wrap_root/sdl-check.log" \
 run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
-test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "5"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
 
 create_direct_launch_tree "$aarch64_skip_root"
 add_aarch64_sdl_fixture "$aarch64_skip_root"
@@ -401,7 +404,8 @@ run_direct_launch_for_script "$aarch64_skip_root" "TestAarch64.sh"
 test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
 test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
 ! grep -q 'PMI_DIAG aarch64_sdl_compat_applied=' "$aarch64_skip_root/PORTS.txt"
-test "$(wc -l < "$aarch64_skip_root/sdl-check.log" | tr -d ' ')" = "3"
+test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
+test "$(wc -l < "$aarch64_skip_root/sdl-check.log" | tr -d ' ')" = "2"
 grep -q "^uses-sdl-gl-windowing:$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl$" "$aarch64_skip_root/sdl-check.log"
 
 create_direct_launch_tree "$native_gl_root"
