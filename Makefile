@@ -8,6 +8,11 @@ BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/release
 STAGING_DIR := $(BUILD_DIR)/staging
 SRC_FILES := $(shell find src -name '*.c' -print | sort)
+RUNTIME_BIN_DIR := $(BUILD_DIR)/runtime-bin
+RUNTIME_CACHE_DIR := $(BUILD_DIR)/cache/runtime-bin
+RUNTIME_HELPERS_STAMP := $(RUNTIME_BIN_DIR)/.helpers.stamp
+RUNTIME_BOX64_LIBS_STAMP := $(RUNTIME_BIN_DIR)/.box64-runtime-libs.stamp
+RUNTIME_STAMP := $(RUNTIME_BIN_DIR)/.stamp
 
 MY355_TOOLCHAIN := ghcr.io/loveretro/my355-toolchain:latest
 COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -I./src -I./third_party/jsmn
@@ -39,19 +44,41 @@ build/my355/7zzs:
 	@mkdir -p build/my355
 	sh scripts/build-7zz-from-source.sh $(CURDIR)/build/my355
 
-build/runtime-bin/.stamp: tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c scripts/build-box64-from-source.sh scripts/fetch-box64-runtime-libs.sh third_party/stb/stb_image.h third_party/stb/stb_image_write.h third_party/sdl2/my355/libSDL2-2.0.so.0
-	@rm -rf build/runtime-bin
-	@mkdir -p build/runtime-bin build/runtime-bin/aarch64
+$(RUNTIME_BIN_DIR):
+	@mkdir -p "$@"
+
+$(RUNTIME_BIN_DIR)/aarch64:
+	@mkdir -p "$@"
+
+$(RUNTIME_CACHE_DIR):
+	@mkdir -p "$@"
+
+$(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c third_party/stb/stb_image.h third_party/stb/stb_image_write.h | $(RUNTIME_BIN_DIR)
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
 		-w /workspace \
 		$(MY355_TOOLCHAIN) \
-		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && sh /workspace/scripts/build-box64-from-source.sh /workspace/build/runtime-bin'
-	sh scripts/fetch-box64-runtime-libs.sh "$(CURDIR)/build/runtime-bin"
-	cp third_party/sdl2/my355/libSDL2-2.0.so.0 build/runtime-bin/aarch64/libSDL2-2.0.so.0
+		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check'
 	@touch $@
 
-build/my355/runtime-bin/.stamp: build/runtime-bin/.stamp
+$(RUNTIME_BIN_DIR)/box64: scripts/build-box64-from-source.sh | $(RUNTIME_BIN_DIR) $(RUNTIME_CACHE_DIR)
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		-w /workspace \
+		$(MY355_TOOLCHAIN) \
+		sh /workspace/scripts/build-box64-from-source.sh /workspace/build/runtime-bin /workspace/build/cache/runtime-bin/box64
+
+$(RUNTIME_BOX64_LIBS_STAMP): scripts/fetch-box64-runtime-libs.sh | $(RUNTIME_BIN_DIR)
+	sh scripts/fetch-box64-runtime-libs.sh "$(CURDIR)/build/runtime-bin"
+	@touch $@
+
+$(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0: third_party/sdl2/my355/libSDL2-2.0.so.0 | $(RUNTIME_BIN_DIR)/aarch64
+	cp third_party/sdl2/my355/libSDL2-2.0.so.0 "$@"
+
+$(RUNTIME_STAMP): $(RUNTIME_HELPERS_STAMP) $(RUNTIME_BIN_DIR)/box64 $(RUNTIME_BOX64_LIBS_STAMP) $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0
+	@touch $@
+
+build/my355/runtime-bin/.stamp: $(RUNTIME_STAMP)
 	@rm -rf build/my355/runtime-bin
 	@mkdir -p build/my355/runtime-bin
 	cp -R build/runtime-bin/. build/my355/runtime-bin/
@@ -61,6 +88,7 @@ test-native:
 	@mkdir -p $(BUILD_DIR)/tests
 	cc -std=c11 -Wall -Wextra tools/pm-sdl-compat-check.c -o $(BUILD_DIR)/tests/pm-sdl-compat-check
 	sh tests/test_pm_sdl_compat_check.sh $(BUILD_DIR)/tests/pm-sdl-compat-check
+	sh tests/test_build_box64_cache.sh
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_platform.c src/platform.c -o $(BUILD_DIR)/tests/test_platform
 	./$(BUILD_DIR)/tests/test_platform
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_json.c src/json.c -o $(BUILD_DIR)/tests/test_json
