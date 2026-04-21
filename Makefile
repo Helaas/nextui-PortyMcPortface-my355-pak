@@ -53,12 +53,12 @@ $(RUNTIME_BIN_DIR)/aarch64:
 $(RUNTIME_CACHE_DIR):
 	@mkdir -p "$@"
 
-$(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c third_party/stb/stb_image.h third_party/stb/stb_image_write.h | $(RUNTIME_BIN_DIR)
+$(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c tools/pm-port-probe.c third_party/stb/stb_image.h third_party/stb/stb_image_write.h | $(RUNTIME_BIN_DIR)
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
 		-w /workspace \
 		$(MY355_TOOLCHAIN) \
-		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check'
+		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-port-probe /workspace/tools/pm-port-probe.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-port-probe'
 	@touch $@
 
 $(RUNTIME_BIN_DIR)/box64: scripts/build-box64-from-source.sh | $(RUNTIME_BIN_DIR) $(RUNTIME_CACHE_DIR)
@@ -88,6 +88,8 @@ test-native:
 	@mkdir -p $(BUILD_DIR)/tests
 	cc -std=c11 -Wall -Wextra tools/pm-sdl-compat-check.c -o $(BUILD_DIR)/tests/pm-sdl-compat-check
 	sh tests/test_pm_sdl_compat_check.sh $(BUILD_DIR)/tests/pm-sdl-compat-check
+	cc -std=c11 -Wall -Wextra tools/pm-port-probe.c -o $(BUILD_DIR)/tests/pm-port-probe
+	sh tests/test_pm_port_probe.sh $(BUILD_DIR)/tests/pm-port-probe
 	sh tests/test_build_box64_cache.sh
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_platform.c src/platform.c -o $(BUILD_DIR)/tests/test_platform
 	./$(BUILD_DIR)/tests/test_platform
