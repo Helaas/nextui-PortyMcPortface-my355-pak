@@ -461,6 +461,109 @@ launcher_requires_flip_libmali() {
     grep -q 'sbc_4_3_rcv12' "$launcher_path" 2>/dev/null
 }
 
+binary_uses_sdl_gl_windowing() {
+    local file="$1"
+    local checker="$PAK_DIR/bin/pm-sdl-compat-check"
+    local cache_path
+    local cache_value
+
+    [ -f "$file" ] || return 1
+    cache_path=$(printf '%s.pmi-system-gl-windowing\n' "$file")
+
+    if [ -f "$cache_path" ] &&
+       ! [ "$file" -nt "$cache_path" ] &&
+       { [ ! -e "$checker" ] || ! [ "$checker" -nt "$cache_path" ]; }; then
+        cache_value=$(cat "$cache_path" 2>/dev/null || true)
+        [ "$cache_value" = "match" ]
+        return $?
+    fi
+
+    if [ -x "$checker" ]; then
+        if "$checker" uses-sdl-gl-windowing "$file"; then
+            write_sdl_compat_check_cache "$cache_path" "match"
+            return 0
+        fi
+        write_sdl_compat_check_cache "$cache_path" "skip"
+        return 1
+    fi
+
+    if [ "${PMI_SYSTEM_GL_CHECKER_WARNED:-0}" != "1" ]; then
+        PMI_SYSTEM_GL_CHECKER_WARNED=1
+        echo "PMI_WARN system_gl_checker_missing=$checker"
+    fi
+
+    if command -v strings >/dev/null 2>&1 &&
+       is_elf64_file "$file" &&
+       strings "$file" 2>/dev/null | grep -qx 'SDL_GL_CreateContext' &&
+       strings "$file" 2>/dev/null | grep -qx 'SDL_CreateWindow'; then
+        write_sdl_compat_check_cache "$cache_path" "match"
+        return 0
+    fi
+
+    write_sdl_compat_check_cache "$cache_path" "skip"
+    return 1
+}
+
+port_has_bundled_native_gl_stack() {
+    local port_dir="$1"
+
+    [ -d "$port_dir/lib" ] || return 1
+    if find "$port_dir/lib" -maxdepth 2 -type f \
+        \( -name 'libEGL.so*' -o -name 'libGLES*.so*' -o -name 'libGL.so*' \
+           -o -name 'libgbm.so*' -o -name 'libdrm.so*' -o -name 'libmali.so*' \) \
+        | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
+
+launcher_requires_system_gl_stack() {
+    local launcher_path="$1"
+    local port_json port_dir shell_name file
+
+    [ -f "$launcher_path" ] || return 1
+
+    for port_json in "$REAL_PORTS_DIR"/*/port.json; do
+        [ -f "$port_json" ] || continue
+        shell_name=$(port_shell_from_json "$port_json")
+        [ -n "$shell_name" ] || continue
+        if [ "$REAL_PORTS_DIR/$shell_name" != "$launcher_path" ]; then
+            continue
+        fi
+        if ! port_has_arch "$port_json" "aarch64"; then
+            return 1
+        fi
+
+        port_dir=$(dirname "$port_json")
+        if port_has_bundled_native_gl_stack "$port_dir"; then
+            return 1
+        fi
+
+        if find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+            [ -n "$file" ] || continue
+            case "$file" in
+                *.sh|*.bash|*.so|*.so.*|*.original)
+                    continue
+                    ;;
+            esac
+            if is_aarch64_sdl_compat_wrapper "$file"; then
+                continue
+            fi
+            if binary_uses_sdl_gl_windowing "$file"; then
+                echo "$file"
+                return 0
+            fi
+        done | grep -q .; then
+            return 0
+        fi
+
+        return 1
+    done
+
+    return 1
+}
+
 write_box64_wrapper() {
     local wrapper_path="$1"
 
@@ -724,14 +827,16 @@ binary_requires_sdl_default_audio_info() {
     [ -f "$inspect_path" ] || return 1
 
     cache_path=$(sdl_compat_check_cache_path "$binary_path")
-    if [ -f "$cache_path" ] && [ "$cache_path" -nt "$inspect_path" ] && [ "$cache_path" -nt "$checker" ]; then
+    if [ -f "$cache_path" ] &&
+       ! [ "$inspect_path" -nt "$cache_path" ] &&
+       { [ ! -e "$checker" ] || ! [ "$checker" -nt "$cache_path" ]; }; then
         cache_value=$(cat "$cache_path" 2>/dev/null || true)
         [ "$cache_value" = "wrap" ]
         return $?
     fi
 
     if [ -x "$checker" ]; then
-        if "$checker" "$inspect_path"; then
+        if "$checker" needs-default-audio-info "$inspect_path"; then
             write_sdl_compat_check_cache "$cache_path" "wrap"
             return 0
         fi
@@ -861,7 +966,7 @@ refresh_aarch64_sdl_compat_wrappers() {
         fi
 
         port_dir=$(dirname "$port_json")
-        find "$port_dir" -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
             [ -n "$file" ] || continue
             case "$file" in
                 *.sh|*.bash|*.so|*.so.*|*.original)
@@ -891,7 +996,7 @@ refresh_aarch64_sdl_compat_for_launcher() {
         fi
 
         port_dir=$(dirname "$port_json")
-        find "$port_dir" -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
             [ -n "$file" ] || continue
             case "$file" in
                 *.sh|*.bash|*.so|*.so.*|*.original)
@@ -1083,7 +1188,12 @@ launch_port_script() {
     fi
     prepare_flip_joy_type_for_port
     chmod +x "$script_to_run" 2>/dev/null || true
-    bash "$script_to_run"
+    if launcher_requires_system_gl_stack "$source_script"; then
+        echo "PMI_DIAG system_gl_stack_launcher=$source_script"
+        PMI_LD_LIBRARY_STRATEGY=system-gl bash "$script_to_run"
+    else
+        bash "$script_to_run"
+    fi
 }
 
 trap cleanup EXIT INT TERM HUP QUIT

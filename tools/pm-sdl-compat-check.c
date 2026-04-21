@@ -59,36 +59,92 @@ _Static_assert(sizeof(elf64_ehdr) == 64, "unexpected elf64_ehdr size");
 _Static_assert(sizeof(elf64_shdr) == 64, "unexpected elf64_shdr size");
 _Static_assert(sizeof(elf64_sym) == 24, "unexpected elf64_sym size");
 
-static const char *TARGET_SYMBOL = "SDL_GetDefaultAudioInfo";
+typedef enum {
+    PROBE_NEEDS_DEFAULT_AUDIO_INFO = 0,
+    PROBE_USES_SDL_GL_WINDOWING = 1
+} probe_mode;
+
+static const char *DEFAULT_AUDIO_INFO_SYMBOLS[] = {
+    "SDL_GetDefaultAudioInfo"
+};
+
+static const char *SDL_GL_WINDOWING_SYMBOLS[] = {
+    "SDL_GL_CreateContext",
+    "SDL_CreateWindow"
+};
 
 static int read_file(const char *path, unsigned char **out_data, size_t *out_size);
 static int is_supported_elf64(const unsigned char *data, size_t size);
 static int range_within_file(size_t file_size, uint64_t offset, uint64_t length);
 static int file_contains_bytes(const unsigned char *data, size_t size, const char *needle);
 static int dynsym_contains_undefined_symbol(const unsigned char *data, size_t size, const char *symbol);
+static int parse_probe_mode(int argc, char **argv, probe_mode *out_mode, const char **out_path);
+static int binary_matches_symbols(const unsigned char *data, size_t size, const char *const *symbols, size_t symbol_count);
 
 int main(int argc, char **argv) {
     unsigned char *data = NULL;
     size_t size = 0;
+    const char *path = NULL;
+    probe_mode mode = PROBE_NEEDS_DEFAULT_AUDIO_INFO;
     int result = 1;
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <binary>\n", argc > 0 ? argv[0] : "pm-sdl-compat-check");
+    if (parse_probe_mode(argc, argv, &mode, &path) != 0)
         return 2;
-    }
 
-    if (read_file(argv[1], &data, &size) != 0)
+    if (read_file(path, &data, &size) != 0)
         return 1;
 
     if (is_supported_elf64(data, size)) {
-        int dynsym_result = dynsym_contains_undefined_symbol(data, size, TARGET_SYMBOL);
-
-        if (dynsym_result > 0 || (dynsym_result < 0 && file_contains_bytes(data, size, TARGET_SYMBOL)))
-            result = 0;
+        switch (mode) {
+            case PROBE_NEEDS_DEFAULT_AUDIO_INFO:
+                if (binary_matches_symbols(data, size,
+                                           DEFAULT_AUDIO_INFO_SYMBOLS,
+                                           sizeof(DEFAULT_AUDIO_INFO_SYMBOLS) / sizeof(DEFAULT_AUDIO_INFO_SYMBOLS[0])))
+                    result = 0;
+                break;
+            case PROBE_USES_SDL_GL_WINDOWING:
+                if (binary_matches_symbols(data, size,
+                                           SDL_GL_WINDOWING_SYMBOLS,
+                                           sizeof(SDL_GL_WINDOWING_SYMBOLS) / sizeof(SDL_GL_WINDOWING_SYMBOLS[0])))
+                    result = 0;
+                break;
+        }
     }
 
     free(data);
     return result;
+}
+
+static int parse_probe_mode(int argc, char **argv, probe_mode *out_mode, const char **out_path) {
+    const char *program_name = (argc > 0 && argv[0] != NULL) ? argv[0] : "pm-sdl-compat-check";
+
+    if (out_mode == NULL || out_path == NULL) {
+        fprintf(stderr, "usage: %s [needs-default-audio-info|uses-sdl-gl-windowing] <binary>\n", program_name);
+        return -1;
+    }
+
+    if (argc == 2) {
+        *out_mode = PROBE_NEEDS_DEFAULT_AUDIO_INFO;
+        *out_path = argv[1];
+        return 0;
+    }
+
+    if (argc == 3) {
+        if (strcmp(argv[1], "needs-default-audio-info") == 0) {
+            *out_mode = PROBE_NEEDS_DEFAULT_AUDIO_INFO;
+        } else if (strcmp(argv[1], "uses-sdl-gl-windowing") == 0) {
+            *out_mode = PROBE_USES_SDL_GL_WINDOWING;
+        } else {
+            fprintf(stderr, "usage: %s [needs-default-audio-info|uses-sdl-gl-windowing] <binary>\n", program_name);
+            return -1;
+        }
+
+        *out_path = argv[2];
+        return 0;
+    }
+
+    fprintf(stderr, "usage: %s [needs-default-audio-info|uses-sdl-gl-windowing] <binary>\n", program_name);
+    return -1;
 }
 
 static int read_file(const char *path, unsigned char **out_data, size_t *out_size) {
@@ -231,4 +287,24 @@ static int dynsym_contains_undefined_symbol(const unsigned char *data, size_t si
     }
 
     return 0;
+}
+
+static int binary_matches_symbols(const unsigned char *data, size_t size, const char *const *symbols, size_t symbol_count) {
+    size_t index;
+
+    if (!is_supported_elf64(data, size) || symbols == NULL || symbol_count == 0)
+        return 0;
+
+    for (index = 0; index < symbol_count; index++) {
+        int dynsym_result;
+
+        dynsym_result = dynsym_contains_undefined_symbol(data, size, symbols[index]);
+        if (dynsym_result > 0)
+            continue;
+        if (dynsym_result < 0 && file_contains_bytes(data, size, symbols[index]))
+            continue;
+        return 0;
+    }
+
+    return 1;
 }

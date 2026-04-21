@@ -39,26 +39,48 @@ EOF
 #!/bin/sh
 set -eu
 
+mode="needs-default-audio-info"
 file="$1"
+if [ "$#" -ge 2 ]; then
+	mode="$1"
+	file="$2"
+fi
 if [ -n "${PMI_TEST_SDL_COMPAT_CHECK_LOG:-}" ]; then
-	printf '%s\n' "$file" >>"$PMI_TEST_SDL_COMPAT_CHECK_LOG"
+	printf '%s:%s\n' "$mode" "$file" >>"$PMI_TEST_SDL_COMPAT_CHECK_LOG"
 fi
 
 header=$(/bin/dd if="$file" bs=1 count=5 2>/dev/null | /usr/bin/od -An -tx1 | tr -d ' \n')
 [ "$header" = "7f454c4602" ] || exit 1
-/usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$file"
+case "$mode" in
+	needs-default-audio-info)
+		/usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$file"
+		;;
+	uses-sdl-gl-windowing)
+		/usr/bin/grep -aq 'SDL_GL_CreateContext' "$file"
+		/usr/bin/grep -aq 'SDL_CreateWindow' "$file"
+		;;
+	*)
+		exit 2
+		;;
+esac
 EOF
 	chmod +x "$pak_dir/bin/pm-sdl-compat-check"
 
 	cat >"$pak_dir/files/control.txt" <<EOF
 #!/bin/bash
+CUR_TTY=/dev/null
 XDG_DATA_HOME="\${XDG_DATA_HOME:-\$HOME/.local/share}"
-if [ -d "\$XDG_DATA_HOME/PortMaster" ]; then
-  export controlfolder="\$XDG_DATA_HOME/PortMaster"
-else
-  export controlfolder="$emu_dir"
-fi
+runtime_root="$emu_dir"
+export controlfolder="\$runtime_root"
 export directory="${temp_data_dir#/}"
+export PATH="\${runtime_root%/PortMaster}/bin:\$PATH"
+if [ "\${PMI_LD_LIBRARY_STRATEGY:-}" = "system-gl" ]; then
+  export LD_LIBRARY_PATH="/usr/lib:/usr/trimui/lib"
+else
+  export LD_LIBRARY_PATH="\${runtime_root%/PortMaster}/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+fi
+export ESUDO=""
+export ESUDOKILL="-1"
 export SDL_GAMECONTROLLERCONFIG_FILE="\$controlfolder/gamecontrollerdb.txt"
 get_controls() {
   LOWRES="N"
@@ -246,6 +268,47 @@ EOF
 	printf 'bundled-sdl\n' >"$pak_dir/runtime/aarch64/lib/libSDL2-2.0.so.0"
 }
 
+add_native_gl_fixture() {
+	root="$1"
+	launcher_name="$2"
+	port_name="$3"
+	output_name="$4"
+	with_bundled_gl="${5:-0}"
+	real_ports_dir="$root/Roms/Ports (PORTS)/.ports"
+	port_dir="$real_ports_dir/$port_name"
+
+	mkdir -p "$port_dir/lib/libarm64"
+
+	cat >"$real_ports_dir/$launcher_name" <<EOF
+#!/usr/bin/env bash
+set -eu
+source "\$EMU_DIR/control.txt"
+LIB_DIR="/\$directory/ports/$port_name/lib/libarm64"
+export LD_LIBRARY_PATH="\$LIB_DIR:\$LD_LIBRARY_PATH"
+printf '%s\n' "\$LD_LIBRARY_PATH" >"\$TEMP_DATA_DIR/$output_name"
+EOF
+	chmod +x "$real_ports_dir/$launcher_name"
+
+	cat >"$port_dir/port.json" <<EOF
+{
+  "attr": {
+    "arch": ["aarch64"]
+  },
+  "files": {
+    "$launcher_name": "$launcher_name",
+    "$port_name/": "$port_name/"
+  }
+}
+EOF
+
+	printf '\177ELF\002stub\nSDL_GL_CreateContext\nSDL_CreateWindow\n' >"$port_dir/gl-port"
+	chmod +x "$port_dir/gl-port"
+
+	if [ "$with_bundled_gl" = "1" ]; then
+		printf 'egl\n' >"$port_dir/lib/libarm64/libEGL.so.1"
+	fi
+}
+
 failure_root="$(mktemp -d)"
 success_root="$(mktemp -d)"
 joy_override_root="$(mktemp -d)"
@@ -253,7 +316,9 @@ joy_passthrough_root="$(mktemp -d)"
 joy_readonly_root="$(mktemp -d)"
 aarch64_wrap_root="$(mktemp -d)"
 aarch64_skip_root="$(mktemp -d)"
-trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root"' EXIT
+native_gl_root="$(mktemp -d)"
+bundled_gl_root="$(mktemp -d)"
+trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root"' EXIT
 
 create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
@@ -320,12 +385,12 @@ test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.origi
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.pmi-aarch64-sdl-compat"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.pmi-aarch64-sdl-compat"
-test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "5"
 grep -q "PMI_DIAG aarch64_sdl_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl" "$aarch64_wrap_root/PORTS.txt"
 PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
 PMI_TEST_SDL_COMPAT_CHECK_LOG="$aarch64_wrap_root/sdl-check.log" \
 run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
-test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "5"
 
 create_direct_launch_tree "$aarch64_skip_root"
 add_aarch64_sdl_fixture "$aarch64_skip_root"
@@ -336,4 +401,20 @@ run_direct_launch_for_script "$aarch64_skip_root" "TestAarch64.sh"
 test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
 test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
 ! grep -q 'PMI_DIAG aarch64_sdl_compat_applied=' "$aarch64_skip_root/PORTS.txt"
-test ! -s "$aarch64_skip_root/sdl-check.log"
+test "$(wc -l < "$aarch64_skip_root/sdl-check.log" | tr -d ' ')" = "3"
+grep -q "^uses-sdl-gl-windowing:$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl$" "$aarch64_skip_root/sdl-check.log"
+
+create_direct_launch_tree "$native_gl_root"
+add_native_gl_fixture "$native_gl_root" "TestNativeGL.sh" "nativegl" "native-gl-ld.txt" 0
+PMI_SDL2_SYSTEM_LIB='' PMI_TEST_SDL_COMPAT_CHECK_LOG="$native_gl_root/gl-check.log" run_direct_launch_for_script "$native_gl_root" "TestNativeGL.sh"
+grep -q "PMI_DIAG system_gl_stack_launcher=$native_gl_root/Roms/Ports (PORTS)/.ports/TestNativeGL.sh" "$native_gl_root/PORTS.txt"
+grep -q "^$native_gl_root/.ports_temp/ports/nativegl/lib/libarm64:/usr/lib:/usr/trimui/lib$" "$native_gl_root/.ports_temp/native-gl-ld.txt"
+grep -q "^uses-sdl-gl-windowing:$native_gl_root/Roms/Ports (PORTS)/.ports/nativegl/gl-port$" "$native_gl_root/gl-check.log"
+
+create_direct_launch_tree "$bundled_gl_root"
+add_native_gl_fixture "$bundled_gl_root" "TestBundledGL.sh" "bundledgl" "bundled-gl-ld.txt" 1
+PMI_SDL2_SYSTEM_LIB='' PMI_TEST_SDL_COMPAT_CHECK_LOG="$bundled_gl_root/gl-check.log" run_direct_launch_for_script "$bundled_gl_root" "TestBundledGL.sh"
+! grep -q 'PMI_DIAG system_gl_stack_launcher=' "$bundled_gl_root/PORTS.txt"
+grep -q "^$bundled_gl_root/.ports_temp/ports/bundledgl/lib/libarm64:$bundled_gl_root/Emus/my355/PORTS.pak/lib$" "$bundled_gl_root/.ports_temp/bundled-gl-ld.txt"
+test "$(wc -l < "$bundled_gl_root/gl-check.log" | tr -d ' ')" = "1"
+grep -q "^needs-default-audio-info:$bundled_gl_root/Roms/Ports (PORTS)/.ports/bundledgl/gl-port$" "$bundled_gl_root/gl-check.log"
