@@ -224,6 +224,8 @@ int main(void) {
         "            return image\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/pm-artwork-convert", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-sdl-compat-check", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf");
@@ -244,6 +246,10 @@ int main(void) {
     assert(fs_ensure_dir(file_path) == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "box64-x86_64-linux-gnu/libc.so.6");
     assert(write_text_file(file_path, "x64-libc") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64");
+    assert(fs_ensure_dir(file_path) == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/libSDL2-2.0.so.0");
+    assert(write_text_file(file_path, "aarch64-sdl2") == 0);
     assert(write_text_file(tool_launch, "#!/bin/sh\nexit 0\n") == 0);
     assert(write_text_file(tool_metadata, "{}\n") == 0);
 
@@ -308,6 +314,8 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-artwork-convert", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-sdl-compat-check", payload_dir);
+    assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/box64", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partaa", payload_dir);
@@ -315,6 +323,8 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partab", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partac", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/lib/libSDL2-2.0.so.0", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
     assert(stat(file_path, &st) == 0);
@@ -410,6 +420,31 @@ int main(void) {
     assert(strstr(file_content, "\"$SELF_DIR\"|\"$SELF_DIR\"/*)") != NULL);
     assert(strstr(file_content, "ARMHF_EFFECTIVE_LD_LIBRARY_PATH=\"$ARMHF_LIB_PATH${ARMHF_PORT_LIB_PATH:+:$ARMHF_PORT_LIB_PATH}\"") != NULL);
     assert(strstr(file_content, "exec \"$ARMHF_LOADER\" --library-path \"$ARMHF_EFFECTIVE_LD_LIBRARY_PATH\" \"$REAL_BINARY\" \"$@\"") != NULL);
+    assert(strstr(file_content, "default_sdl2_candidate_path()") != NULL);
+    assert(strstr(file_content, "if [ -n \"${PMI_SDL2_SYSTEM_LIB:-}\" ] && [ -f \"$PMI_SDL2_SYSTEM_LIB\" ]; then") != NULL);
+    assert(strstr(file_content, "strings \"$system_sdl\" 2>/dev/null | grep -qx 'SDL_GetDefaultAudioInfo'") != NULL);
+    assert(strstr(file_content, "sdl_compat_check_cache_path()") != NULL);
+    assert(strstr(file_content, "write_sdl_compat_check_cache()") != NULL);
+    assert(strstr(file_content, "is_elf64_file()") != NULL);
+    assert(strstr(file_content, "header=$(LC_ALL=C dd if=\"$file\" bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d ' \\n')") != NULL);
+    assert(strstr(file_content, "binary_requires_sdl_default_audio_info_fallback()") != NULL);
+    assert(strstr(file_content, "local checker=\"$PAK_DIR/bin/pm-sdl-compat-check\"") != NULL);
+    assert(strstr(file_content, "cache_path=$(sdl_compat_check_cache_path \"$binary_path\")") != NULL);
+    assert(strstr(file_content, "if [ -f \"$cache_path\" ] && [ \"$cache_path\" -nt \"$inspect_path\" ] && [ \"$cache_path\" -nt \"$checker\" ]; then") != NULL);
+    assert(strstr(file_content, "write_sdl_compat_check_cache \"$cache_path\" \"wrap\"") != NULL);
+    assert(strstr(file_content, "write_sdl_compat_check_cache \"$cache_path\" \"skip\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN aarch64_sdl_compat_checker_missing=$checker\"") != NULL);
+    assert(strstr(file_content, "head -n 2 \"$file\" 2>/dev/null | grep -qx '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1'") != NULL);
+    assert(strstr(file_content, "write_aarch64_sdl_compat_wrapper()") != NULL);
+    assert(strstr(file_content, "# PMI_AARCH64_SDL_COMPAT_WRAPPER=1") != NULL);
+    assert(strstr(file_content, "AARCH64_SDL_RUNTIME_LIB=\"$PAK_DIR/runtime/aarch64/lib\"") != NULL);
+    assert(strstr(file_content, "export LD_LIBRARY_PATH=\"$AARCH64_SDL_RUNTIME_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_wrappers()") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_for_launcher()") != NULL);
+    assert(strstr(file_content, "if ! port_has_arch \"$port_json\" \"aarch64\"; then") != NULL);
+    assert(strstr(file_content, "binary_requires_sdl_default_audio_info \"$binary_path\" \"$inspect_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN aarch64_sdl_compat_missing=$runtime_sdl\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG aarch64_sdl_compat_applied=$binary_path\"") != NULL);
     assert(strstr(file_content, "self_pid=\"$$\"") != NULL);
     assert(strstr(file_content, "pgrep -f \"$pattern\" | while IFS= read -r pid || [ -n \"$pid\" ]; do") != NULL);
     assert(strstr(file_content, "[ \"$pid\" = \"$self_pid\" ] && continue") != NULL);
@@ -448,6 +483,9 @@ int main(void) {
     assert(strstr(file_content, "refresh_armhf_binary_wrappers()") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type f -name 'gmloader'") != NULL);
     assert(strstr(file_content, "write_armhf_exec_compat_wrapper \"$file\"") != NULL);
+    assert(strstr(file_content, "find \"$port_dir\" -type f -perm -111") != NULL);
+    assert(strstr(file_content, "if ! is_aarch64_sdl_compat_wrapper \"$file\" && ! is_elf64_file \"$file\"; then") == NULL);
+    assert(strstr(file_content, "maybe_refresh_aarch64_sdl_compat_binary \"$file\"") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs()") != NULL);
     assert(strstr(file_content, "local runtime_dir=\"$PAK_DIR/lib/box64-i386-linux-gnu\"") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type d -path '*/gamedata/*/32/lib'") != NULL);
@@ -465,6 +503,8 @@ int main(void) {
     assert(strstr(file_content, "local source_script=\"${PMI_PORT_SCRIPT:-$ROM_PATH}\"") != NULL);
     assert(strstr(file_content, "apply_port_arch_rewrites") != NULL);
     assert(strstr(file_content, "refresh_armhf_binary_wrappers \"$REAL_PORTS_DIR\"") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_wrappers \"$REAL_PORTS_DIR\"") == NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_for_launcher \"$source_script\"") != NULL);
     assert(strstr(file_content, "if launcher_requires_armhf \"$source_script\"; then") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs \"$REAL_PORTS_DIR\"") != NULL);
     assert(strstr(file_content, "bind_flip_libmali") != NULL);

@@ -39,15 +39,16 @@ build/my355/7zzs:
 	@mkdir -p build/my355
 	sh scripts/build-7zz-from-source.sh $(CURDIR)/build/my355
 
-build/runtime-bin/.stamp: tools/pm-artwork-convert.c scripts/build-box64-from-source.sh scripts/fetch-box64-runtime-libs.sh third_party/stb/stb_image.h third_party/stb/stb_image_write.h
+build/runtime-bin/.stamp: tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c scripts/build-box64-from-source.sh scripts/fetch-box64-runtime-libs.sh third_party/stb/stb_image.h third_party/stb/stb_image_write.h third_party/sdl2/my355/libSDL2-2.0.so.0
 	@rm -rf build/runtime-bin
-	@mkdir -p build/runtime-bin
+	@mkdir -p build/runtime-bin build/runtime-bin/aarch64
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
 		-w /workspace \
 		$(MY355_TOOLCHAIN) \
-		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && sh /workspace/scripts/build-box64-from-source.sh /workspace/build/runtime-bin'
+		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && sh /workspace/scripts/build-box64-from-source.sh /workspace/build/runtime-bin'
 	sh scripts/fetch-box64-runtime-libs.sh "$(CURDIR)/build/runtime-bin"
+	cp third_party/sdl2/my355/libSDL2-2.0.so.0 build/runtime-bin/aarch64/libSDL2-2.0.so.0
 	@touch $@
 
 build/my355/runtime-bin/.stamp: build/runtime-bin/.stamp
@@ -58,6 +59,8 @@ build/my355/runtime-bin/.stamp: build/runtime-bin/.stamp
 
 test-native:
 	@mkdir -p $(BUILD_DIR)/tests
+	cc -std=c11 -Wall -Wextra tools/pm-sdl-compat-check.c -o $(BUILD_DIR)/tests/pm-sdl-compat-check
+	sh tests/test_pm_sdl_compat_check.sh $(BUILD_DIR)/tests/pm-sdl-compat-check
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_platform.c src/platform.c -o $(BUILD_DIR)/tests/test_platform
 	./$(BUILD_DIR)/tests/test_platform
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_json.c src/json.c -o $(BUILD_DIR)/tests/test_json

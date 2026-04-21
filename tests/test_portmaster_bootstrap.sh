@@ -29,6 +29,27 @@ exec /usr/bin/sed "$@"
 EOF
 	chmod +x "$shim_bin/sed"
 
+	cat >"$shim_bin/strings" <<'EOF'
+#!/bin/sh
+exec /usr/bin/strings "$@"
+EOF
+	chmod +x "$shim_bin/strings"
+
+	cat >"$pak_dir/bin/pm-sdl-compat-check" <<'EOF'
+#!/bin/sh
+set -eu
+
+file="$1"
+if [ -n "${PMI_TEST_SDL_COMPAT_CHECK_LOG:-}" ]; then
+	printf '%s\n' "$file" >>"$PMI_TEST_SDL_COMPAT_CHECK_LOG"
+fi
+
+header=$(/bin/dd if="$file" bs=1 count=5 2>/dev/null | /usr/bin/od -An -tx1 | tr -d ' \n')
+[ "$header" = "7f454c4602" ] || exit 1
+/usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$file"
+EOF
+	chmod +x "$pak_dir/bin/pm-sdl-compat-check"
+
 	cat >"$pak_dir/files/control.txt" <<EOF
 #!/bin/bash
 XDG_DATA_HOME="\${XDG_DATA_HOME:-\$HOME/.local/share}"
@@ -155,8 +176,9 @@ EOF
 	chmod +x "$port_dir/gmloader"
 }
 
-run_direct_launch() {
+run_direct_launch_for_script() {
 	root="$1"
+	launcher_name="$2"
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
 	shim_bin="$root/test-bin"
@@ -167,8 +189,10 @@ run_direct_launch() {
 
 	PAK_DIR="$pak_dir" \
 	EMU_DIR="$emu_dir" \
-	ROM_PATH="$rom_dir/TestPort.sh" \
-	PMI_PORT_SCRIPT="$rom_dir/.ports/TestPort.sh" \
+	ROM_PATH="$rom_dir/$launcher_name" \
+	PMI_PORT_SCRIPT="$rom_dir/.ports/$launcher_name" \
+	PMI_SDL2_SYSTEM_LIB="${PMI_SDL2_SYSTEM_LIB:-}" \
+	PMI_TEST_SDL_COMPAT_CHECK_LOG="${PMI_TEST_SDL_COMPAT_CHECK_LOG:-}" \
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
@@ -176,12 +200,60 @@ run_direct_launch() {
 	bash "$pak_dir/Portmaster.sh"
 }
 
+run_direct_launch() {
+	run_direct_launch_for_script "$1" "TestPort.sh"
+}
+
+add_aarch64_sdl_fixture() {
+	root="$1"
+	real_ports_dir="$root/Roms/Ports (PORTS)/.ports"
+	port_dir="$real_ports_dir/testaarch64"
+	pak_dir="$root/Emus/my355/PORTS.pak"
+	system_sdl_dir="$root/system-sdl"
+
+	mkdir -p "$port_dir" "$pak_dir/runtime/aarch64/lib" "$system_sdl_dir"
+
+	cat >"$real_ports_dir/TestAarch64.sh" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+	chmod +x "$real_ports_dir/TestAarch64.sh"
+
+	cat >"$port_dir/port.json" <<'EOF'
+{
+  "attr": {
+    "arch": ["aarch64"]
+  },
+  "files": {
+    "TestAarch64.sh": "TestAarch64.sh",
+    "testaarch64/": "testaarch64/"
+  }
+}
+EOF
+
+	printf '\177ELF\002stub\nSDL_GetDefaultAudioInfo\n' >"$port_dir/needs-sdl"
+	chmod +x "$port_dir/needs-sdl"
+
+	cat >"$port_dir/not-elf" <<'EOF'
+#!/bin/sh
+echo SDL_GetDefaultAudioInfo >/dev/null
+EOF
+	chmod +x "$port_dir/not-elf"
+
+	printf '\177ELF\002stub\nSomeOtherSymbol\n' >"$port_dir/no-sdl"
+	chmod +x "$port_dir/no-sdl"
+
+	printf 'bundled-sdl\n' >"$pak_dir/runtime/aarch64/lib/libSDL2-2.0.so.0"
+}
+
 failure_root="$(mktemp -d)"
 success_root="$(mktemp -d)"
 joy_override_root="$(mktemp -d)"
 joy_passthrough_root="$(mktemp -d)"
 joy_readonly_root="$(mktemp -d)"
-trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root"' EXIT
+aarch64_wrap_root="$(mktemp -d)"
+aarch64_skip_root="$(mktemp -d)"
+trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root"' EXIT
 
 create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
@@ -231,3 +303,37 @@ PMI_JOY_TYPE_NODE="$joy_readonly_root/joy_type" run_direct_launch "$joy_readonly
 grep -q "PMI_WARN joy_type_node_not_writable=$joy_readonly_root/joy_type" "$joy_readonly_root/PORTS.txt"
 test "$(sed 's/ .*//' "$joy_readonly_root/.ports_temp/joy_type_during.txt")" = "0"
 test "$(sed 's/ .*//' "$joy_readonly_root/joy_type")" = "0"
+
+create_direct_launch_tree "$aarch64_wrap_root"
+add_aarch64_sdl_fixture "$aarch64_wrap_root"
+printf 'system-sdl-without-symbol\n' >"$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0"
+PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_SDL_COMPAT_CHECK_LOG="$aarch64_wrap_root/sdl-check.log" \
+run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
+grep -q '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf"
+test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.original"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl"
+test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.original"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.pmi-aarch64-sdl-compat"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.pmi-aarch64-sdl-compat"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
+grep -q "PMI_DIAG aarch64_sdl_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl" "$aarch64_wrap_root/PORTS.txt"
+PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_SDL_COMPAT_CHECK_LOG="$aarch64_wrap_root/sdl-check.log" \
+run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
+test "$(wc -l < "$aarch64_wrap_root/sdl-check.log" | tr -d ' ')" = "3"
+
+create_direct_launch_tree "$aarch64_skip_root"
+add_aarch64_sdl_fixture "$aarch64_skip_root"
+printf 'SDL_GetDefaultAudioInfo\n' >"$aarch64_skip_root/system-sdl/libSDL2-2.0.so.0"
+PMI_SDL2_SYSTEM_LIB="$aarch64_skip_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_SDL_COMPAT_CHECK_LOG="$aarch64_skip_root/sdl-check.log" \
+run_direct_launch_for_script "$aarch64_skip_root" "TestAarch64.sh"
+test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
+! grep -q 'PMI_DIAG aarch64_sdl_compat_applied=' "$aarch64_skip_root/PORTS.txt"
+test ! -s "$aarch64_skip_root/sdl-check.log"

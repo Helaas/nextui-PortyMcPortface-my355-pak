@@ -478,6 +478,16 @@ static int install_runtime_support_tools(const install_layout *layout) {
     if (chmod(dst, 0755) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/pm-sdl-compat-check", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-sdl-compat-check", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
     if (install_armhf_runtime(layout) != 0)
         return -1;
 
@@ -502,7 +512,18 @@ static int install_runtime_support_tools(const install_layout *layout) {
     if (!fs_path_exists(src))
         return -1;
     snprintf(dst, sizeof(dst), "%s/lib/box64-x86_64-linux-gnu", layout->payload_pak_dir);
-    return replace_tree(src, dst);
+    if (replace_tree(src, dst) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/libSDL2-2.0.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/lib/libSDL2-2.0.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    return chmod(dst, 0755);
 }
 
 static int ensure_file_parent_dir(const char *path) {

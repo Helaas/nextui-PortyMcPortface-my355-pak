@@ -634,6 +634,276 @@ refresh_armhf_binary_wrappers() {
     done
 }
 
+default_sdl2_candidate_path() {
+    if [ -n "${PMI_SDL2_SYSTEM_LIB:-}" ] && [ -f "$PMI_SDL2_SYSTEM_LIB" ]; then
+        printf '%s\n' "$PMI_SDL2_SYSTEM_LIB"
+        return 0
+    fi
+
+    if [ -f /usr/lib/libSDL2-2.0.so.0 ]; then
+        printf '%s\n' /usr/lib/libSDL2-2.0.so.0
+        return 0
+    fi
+
+    if [ -f /lib/libSDL2-2.0.so.0 ]; then
+        printf '%s\n' /lib/libSDL2-2.0.so.0
+        return 0
+    fi
+
+    return 1
+}
+
+default_sdl2_has_default_audio_info_symbol() {
+    local system_sdl
+
+    if [ "${PMI_SDL2_DEFAULT_AUDIO_INFO_SCANNED:-0}" = "1" ]; then
+        [ "${PMI_SDL2_DEFAULT_AUDIO_INFO_PRESENT:-0}" = "1" ]
+        return $?
+    fi
+
+    PMI_SDL2_DEFAULT_AUDIO_INFO_SCANNED=1
+    PMI_SDL2_DEFAULT_AUDIO_INFO_PRESENT=0
+
+    command -v strings >/dev/null 2>&1 || return 1
+
+    if ! system_sdl=$(default_sdl2_candidate_path); then
+        return 1
+    fi
+
+    PMI_SDL2_SYSTEM_LIB_CACHED="$system_sdl"
+    if strings "$system_sdl" 2>/dev/null | grep -qx 'SDL_GetDefaultAudioInfo'; then
+        PMI_SDL2_DEFAULT_AUDIO_INFO_PRESENT=1
+    fi
+
+    [ "$PMI_SDL2_DEFAULT_AUDIO_INFO_PRESENT" = "1" ]
+}
+
+sdl_compat_check_cache_path() {
+    local binary_path="$1"
+
+    printf '%s.pmi-aarch64-sdl-compat\n' "$binary_path"
+}
+
+write_sdl_compat_check_cache() {
+    local cache_path="$1"
+    local cache_value="$2"
+    local tmp_cache="${cache_path}.tmp.$$"
+
+    if printf '%s\n' "$cache_value" >"$tmp_cache" 2>/dev/null; then
+        mv -f "$tmp_cache" "$cache_path" 2>/dev/null || rm -f "$tmp_cache" 2>/dev/null || true
+    else
+        rm -f "$tmp_cache" 2>/dev/null || true
+    fi
+}
+
+is_elf64_file() {
+    local file="$1"
+    local header
+
+    [ -f "$file" ] || return 1
+
+    header=$(LC_ALL=C dd if="$file" bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    [ "$header" = "7f454c4602" ]
+}
+
+binary_requires_sdl_default_audio_info_fallback() {
+    local file="$1"
+
+    command -v strings >/dev/null 2>&1 || return 1
+    is_elf64_file "$file" || return 1
+    strings "$file" 2>/dev/null | grep -qx 'SDL_GetDefaultAudioInfo'
+}
+
+binary_requires_sdl_default_audio_info() {
+    local binary_path="$1"
+    local inspect_path="${2:-$1}"
+    local checker="$PAK_DIR/bin/pm-sdl-compat-check"
+    local cache_path
+    local cache_value
+
+    [ -f "$inspect_path" ] || return 1
+
+    cache_path=$(sdl_compat_check_cache_path "$binary_path")
+    if [ -f "$cache_path" ] && [ "$cache_path" -nt "$inspect_path" ] && [ "$cache_path" -nt "$checker" ]; then
+        cache_value=$(cat "$cache_path" 2>/dev/null || true)
+        [ "$cache_value" = "wrap" ]
+        return $?
+    fi
+
+    if [ -x "$checker" ]; then
+        if "$checker" "$inspect_path"; then
+            write_sdl_compat_check_cache "$cache_path" "wrap"
+            return 0
+        fi
+        write_sdl_compat_check_cache "$cache_path" "skip"
+        return 1
+    fi
+
+    if [ "${PMI_SDL_COMPAT_CHECKER_WARNED:-0}" != "1" ]; then
+        PMI_SDL_COMPAT_CHECKER_WARNED=1
+        echo "PMI_WARN aarch64_sdl_compat_checker_missing=$checker"
+    fi
+
+    if binary_requires_sdl_default_audio_info_fallback "$inspect_path"; then
+        write_sdl_compat_check_cache "$cache_path" "wrap"
+        return 0
+    fi
+
+    write_sdl_compat_check_cache "$cache_path" "skip"
+    return 1
+}
+
+is_aarch64_sdl_compat_wrapper() {
+    local file="$1"
+
+    [ -f "$file" ] || return 1
+    head -n 2 "$file" 2>/dev/null | grep -qx '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1'
+}
+
+restore_aarch64_sdl_compat_wrapper() {
+    local wrapper_path="$1"
+    local original_path="${wrapper_path}.original"
+
+    is_aarch64_sdl_compat_wrapper "$wrapper_path" || return 0
+    [ -f "$original_path" ] || return 0
+
+    rm -f "$wrapper_path"
+    mv "$original_path" "$wrapper_path"
+}
+
+write_aarch64_sdl_compat_wrapper() {
+    local wrapper_path="$1"
+    local wrapper_dir wrapper_name original_path
+
+    wrapper_dir=$(dirname "$wrapper_path")
+    wrapper_name=$(basename "$wrapper_path")
+    original_path="$wrapper_dir/${wrapper_name}.original"
+
+    if [ ! -f "$original_path" ]; then
+        mv "$wrapper_path" "$original_path"
+    fi
+
+    cat >"$wrapper_path" <<'EOF'
+#!/bin/sh
+# PMI_AARCH64_SDL_COMPAT_WRAPPER=1
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF_NAME=$(basename -- "$0")
+PAK_DIR="${PAK_DIR:-}"
+AARCH64_SDL_RUNTIME_LIB="$PAK_DIR/runtime/aarch64/lib"
+REAL_BINARY="$SELF_DIR/${SELF_NAME}.original"
+
+export LD_LIBRARY_PATH="$AARCH64_SDL_RUNTIME_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [ -z "$PAK_DIR" ] || [ ! -x "$REAL_BINARY" ] || [ ! -f "$AARCH64_SDL_RUNTIME_LIB/libSDL2-2.0.so.0" ]; then
+    echo "FATAL: missing aarch64 SDL compatibility runtime" >&2
+    exit 1
+fi
+
+exec "$REAL_BINARY" "$@"
+EOF
+    chmod +x "$wrapper_path" 2>/dev/null || true
+}
+
+maybe_refresh_aarch64_sdl_compat_binary() {
+    local binary_path="$1"
+    local inspect_path="$binary_path"
+    local runtime_sdl="$PAK_DIR/runtime/aarch64/lib/libSDL2-2.0.so.0"
+
+    [ -f "$binary_path" ] || return 0
+
+    case "$binary_path" in
+        *.sh|*.bash|*.so|*.so.*|*.original)
+            if is_aarch64_sdl_compat_wrapper "$binary_path"; then
+                restore_aarch64_sdl_compat_wrapper "$binary_path"
+            fi
+            return 0
+            ;;
+    esac
+
+    if is_aarch64_sdl_compat_wrapper "$binary_path"; then
+        inspect_path="${binary_path}.original"
+        [ -f "$inspect_path" ] || return 0
+    fi
+
+    if default_sdl2_has_default_audio_info_symbol; then
+        restore_aarch64_sdl_compat_wrapper "$binary_path"
+        return 0
+    fi
+
+    if ! binary_requires_sdl_default_audio_info "$binary_path" "$inspect_path"; then
+        restore_aarch64_sdl_compat_wrapper "$binary_path"
+        return 0
+    fi
+
+    if [ ! -f "$runtime_sdl" ]; then
+        echo "PMI_WARN aarch64_sdl_compat_missing=$runtime_sdl"
+        return 0
+    fi
+
+    if ! is_aarch64_sdl_compat_wrapper "$binary_path"; then
+        write_aarch64_sdl_compat_wrapper "$binary_path"
+        echo "PMI_DIAG aarch64_sdl_compat_applied=$binary_path"
+    fi
+}
+
+refresh_aarch64_sdl_compat_wrappers() {
+    local search_path="$1"
+    local port_json port_dir file
+
+    [ -d "$search_path" ] || return 0
+
+    for port_json in "$search_path"/*/port.json; do
+        [ -f "$port_json" ] || continue
+        if ! port_has_arch "$port_json" "aarch64"; then
+            continue
+        fi
+
+        port_dir=$(dirname "$port_json")
+        find "$port_dir" -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+            [ -n "$file" ] || continue
+            case "$file" in
+                *.sh|*.bash|*.so|*.so.*|*.original)
+                    continue
+                    ;;
+            esac
+            maybe_refresh_aarch64_sdl_compat_binary "$file"
+        done
+    done
+}
+
+refresh_aarch64_sdl_compat_for_launcher() {
+    local launcher_path="$1"
+    local port_json port_dir shell_name file
+
+    [ -f "$launcher_path" ] || return 0
+
+    for port_json in "$REAL_PORTS_DIR"/*/port.json; do
+        [ -f "$port_json" ] || continue
+        shell_name=$(port_shell_from_json "$port_json")
+        [ -n "$shell_name" ] || continue
+        if [ "$REAL_PORTS_DIR/$shell_name" != "$launcher_path" ]; then
+            continue
+        fi
+        if ! port_has_arch "$port_json" "aarch64"; then
+            return 0
+        fi
+
+        port_dir=$(dirname "$port_json")
+        find "$port_dir" -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+            [ -n "$file" ] || continue
+            case "$file" in
+                *.sh|*.bash|*.so|*.so.*|*.original)
+                    continue
+                    ;;
+            esac
+            maybe_refresh_aarch64_sdl_compat_binary "$file"
+        done
+        return 0
+    done
+}
+
 seed_x86_runtime_libs() {
     local search_path="$1"
     local runtime_dir="$PAK_DIR/lib/box64-i386-linux-gnu"
@@ -801,6 +1071,7 @@ launch_port_script() {
     apply_port_arch_rewrites
     refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
     refresh_armhf_binary_wrappers "$REAL_PORTS_DIR"
+    refresh_aarch64_sdl_compat_for_launcher "$source_script"
     script_to_run=$(stage_launch_script "$source_script")
     echo "PMI_DIAG selected_port_script=$source_script"
     echo "PMI_DIAG rewritten_launch_path=$script_to_run"
