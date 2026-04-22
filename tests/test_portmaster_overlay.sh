@@ -9,12 +9,20 @@ emu_dir="$pak_dir/PortMaster"
 xdg_data_home="$root/home/.local/share"
 temp_data_dir="$root/.ports_temp"
 log_file="$root/PORTS.txt"
+helper_marker="$root/power-lid-helper.marker"
 
 mkdir -p "$pak_dir/files" "$emu_dir/pylibs/harbourmaster" "$emu_dir/miyoo" "$xdg_data_home/PortMaster" "$temp_data_dir"
 cp payload/PORTS.pak/Portmaster.sh "$pak_dir/Portmaster.sh"
 mkdir -p "$pak_dir/bin" "$pak_dir/lib"
 printf '#!/bin/sh\nexit 0\n' >"$pak_dir/bin/runtime-helper"
 chmod +x "$pak_dir/bin/runtime-helper"
+cat >"$pak_dir/bin/pm-power-lid-watch" <<EOF
+#!/bin/sh
+set -eu
+touch "$helper_marker"
+exit 0
+EOF
+chmod +x "$pak_dir/bin/pm-power-lid-watch"
 printf 'stub' >"$pak_dir/lib/libruntime-helper.so"
 
 cat >"$pak_dir/files/control.txt" <<EOF
@@ -91,6 +99,7 @@ bash "$pak_dir/Portmaster.sh"
 
 second_hash="$(cksum "$emu_dir/control.txt" "$emu_dir/miyoo/control.txt" "$emu_dir/PortMaster.sh" "$emu_dir/miyoo/PortMaster.txt" "$emu_dir/gamecontrollerdb.txt" "$xdg_data_home/PortMaster/control.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt")"
 [ "$first_hash" = "$second_hash" ]
+[ ! -e "$helper_marker" ]
 
 CONTROL_FILE="$xdg_data_home/PortMaster/control.txt" \
 EXPECTED_CONTROL="$emu_dir" \

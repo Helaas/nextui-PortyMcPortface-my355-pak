@@ -228,6 +228,8 @@ int main(void) {
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/pm-port-probe", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-power-lid-watch", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf");
@@ -319,6 +321,8 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-sdl-compat-check", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-port-probe", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-power-lid-watch", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/box64", payload_dir);
     assert(stat(file_path, &st) == 0);
@@ -438,6 +442,15 @@ int main(void) {
     assert(strstr(file_content, "helper=$(port_probe_helper_path)") != NULL);
     assert(strstr(file_content, "\"$helper\" scan-aarch64-launch-port \"$port_dir\" >\"$tmp_cache\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_WARN port_probe_helper_missing=$helper\"") != NULL);
+    assert(strstr(file_content, "PMI_POWER_LID_HELPER_PIDFILE=\"/tmp/pmi-power-lid-watch.pid\"") != NULL);
+    assert(strstr(file_content, "power_lid_helper_path()") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper()") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper()") != NULL);
+    assert(strstr(file_content, "helper=$(power_lid_helper_path)") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN power_lid_helper_missing=$helper\"") != NULL);
+    assert(strstr(file_content, "\"$helper\" &") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG power_lid_helper_started=$pid\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG power_lid_helper_stop=$pid\"") != NULL);
     assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -newer \"$cache_path\"") != NULL);
     assert(strstr(file_content, "find \"$port_dir/lib\" -maxdepth 2 -type f") != NULL);
     assert(strstr(file_content, "maybe_refresh_aarch64_sdl_compat_binary_from_probe()") != NULL);
@@ -532,9 +545,13 @@ int main(void) {
     assert(strstr(file_content, "if launcher_requires_armhf \"$source_script\"; then") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs \"$REAL_PORTS_DIR\"") != NULL);
     assert(strstr(file_content, "bind_flip_libmali") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper\n\n    while true; do") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper\n    post_gui_rewrites") != NULL);
     assert(strstr(file_content, "if launcher_requires_system_gl_stack \"$source_script\"; then") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG system_gl_stack_launcher=$source_script\"") != NULL);
     assert(strstr(file_content, "PMI_LD_LIBRARY_STRATEGY=system-gl bash \"$script_to_run\"") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper\n    if launcher_requires_system_gl_stack \"$source_script\"; then") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper\n}") != NULL);
     assert(strstr(file_content, "stage_launch_script") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG selected_port_script=$source_script\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG rewritten_launch_path=$script_to_run\"") != NULL);

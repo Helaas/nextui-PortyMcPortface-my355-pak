@@ -53,12 +53,12 @@ $(RUNTIME_BIN_DIR)/aarch64:
 $(RUNTIME_CACHE_DIR):
 	@mkdir -p "$@"
 
-$(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c tools/pm-port-probe.c third_party/stb/stb_image.h third_party/stb/stb_image_write.h | $(RUNTIME_BIN_DIR)
+$(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c tools/pm-port-probe.c tools/pm-power-lid-watch.c third_party/stb/stb_image.h third_party/stb/stb_image_write.h | $(RUNTIME_BIN_DIR)
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
 		-w /workspace \
 		$(MY355_TOOLCHAIN) \
-		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-port-probe /workspace/tools/pm-port-probe.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-port-probe'
+		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-port-probe /workspace/tools/pm-port-probe.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-port-probe && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-power-lid-watch /workspace/tools/pm-power-lid-watch.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-power-lid-watch'
 	@touch $@
 
 $(RUNTIME_BIN_DIR)/box64: scripts/build-box64-from-source.sh | $(RUNTIME_BIN_DIR) $(RUNTIME_CACHE_DIR)
@@ -107,6 +107,7 @@ test-native:
 	./$(BUILD_DIR)/tests/test_payload_exists
 	sh tests/test_portmaster_overlay.sh
 	sh tests/test_portmaster_bootstrap.sh
+	sh tests/test_power_lid_helper.sh
 
 refresh-portmaster-lib-bundle:
 	sh scripts/rebuild-portmaster-lib-bundle.sh

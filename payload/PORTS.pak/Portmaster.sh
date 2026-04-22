@@ -19,6 +19,8 @@ JOY_TYPE_NODE="${PMI_JOY_TYPE_NODE:-/sys/class/miyooio_chr_dev/joy_type}"
 JOY_TYPE_OVERRIDE_VALUE="-1"
 JOY_TYPE_ORIGINAL=""
 JOY_TYPE_RESTORE_NEEDED=0
+PMI_POWER_LID_HELPER_PID=""
+PMI_POWER_LID_HELPER_PIDFILE="/tmp/pmi-power-lid-watch.pid"
 
 mkdir -p "$PM_RUNTIME_ROOT"
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -34,6 +36,7 @@ echo "HM_SCRIPTS_DIR=${HM_SCRIPTS_DIR:-}"
 echo "PM_RUNTIME_ROOT=${PM_RUNTIME_ROOT:-}"
 
 cleanup() {
+    stop_power_lid_helper
     restore_flip_joy_type
     if mount | grep -q "on $SPRUCE_ARMHF_ROOTFS_MOUNT "; then
         umount "$SPRUCE_ARMHF_ROOTFS_MOUNT" >/dev/null 2>&1 || true
@@ -45,6 +48,70 @@ cleanup() {
     if [ "$PORTS_BIND_MOUNTED" = "1" ]; then
         umount "$MOUNTED_PORTS_DIR" >/dev/null 2>&1 || true
     fi
+}
+
+power_lid_helper_path() {
+    printf '%s/bin/pm-power-lid-watch\n' "$PAK_DIR"
+}
+
+stop_power_lid_helper() {
+    local pid="${PMI_POWER_LID_HELPER_PID:-}"
+    local pidfile_pid=""
+
+    if [ -f "$PMI_POWER_LID_HELPER_PIDFILE" ]; then
+        pidfile_pid=$(cat "$PMI_POWER_LID_HELPER_PIDFILE" 2>/dev/null || true)
+    fi
+    if [ -z "$pid" ]; then
+        pid="$pidfile_pid"
+    fi
+    if [ -z "$pid" ]; then
+        rm -f "$PMI_POWER_LID_HELPER_PIDFILE"
+        return 0
+    fi
+
+    if kill -0 "$pid" >/dev/null 2>&1; then
+        echo "PMI_DIAG power_lid_helper_stop=$pid"
+        kill "$pid" >/dev/null 2>&1 || true
+        wait "$pid" >/dev/null 2>&1 || true
+    fi
+
+    if [ -n "$pidfile_pid" ] && [ "$pidfile_pid" = "$pid" ]; then
+        rm -f "$PMI_POWER_LID_HELPER_PIDFILE"
+    fi
+    PMI_POWER_LID_HELPER_PID=""
+}
+
+start_power_lid_helper() {
+    local helper
+    local pid
+    local existing_pid=""
+
+    helper=$(power_lid_helper_path)
+    if [ ! -x "$helper" ]; then
+        echo "PMI_WARN power_lid_helper_missing=$helper"
+        return 0
+    fi
+
+    if [ -n "${PMI_POWER_LID_HELPER_PID:-}" ] && kill -0 "$PMI_POWER_LID_HELPER_PID" >/dev/null 2>&1; then
+        echo "PMI_DIAG power_lid_helper_running=$PMI_POWER_LID_HELPER_PID"
+        return 0
+    fi
+
+    if [ -f "$PMI_POWER_LID_HELPER_PIDFILE" ]; then
+        existing_pid=$(cat "$PMI_POWER_LID_HELPER_PIDFILE" 2>/dev/null || true)
+        if [ -n "$existing_pid" ] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+            echo "PMI_DIAG power_lid_helper_replacing=$existing_pid"
+            kill "$existing_pid" >/dev/null 2>&1 || true
+            wait "$existing_pid" >/dev/null 2>&1 || true
+        fi
+        rm -f "$PMI_POWER_LID_HELPER_PIDFILE"
+    fi
+
+    "$helper" &
+    pid=$!
+    PMI_POWER_LID_HELPER_PID="$pid"
+    printf '%s\n' "$pid" >"$PMI_POWER_LID_HELPER_PIDFILE"
+    echo "PMI_DIAG power_lid_helper_started=$pid"
 }
 
 read_joy_type_value() {
@@ -1102,6 +1169,7 @@ post_gui_rewrites() {
 launch_gui() {
     chmod -R +x "$PM_RUNTIME_ROOT" 2>/dev/null || true
     rm -f "$PM_RUNTIME_ROOT/.pugwash-reboot"
+    start_power_lid_helper
 
     while true; do
         ./pugwash --debug
@@ -1113,6 +1181,7 @@ launch_gui() {
         rm -f "$PM_RUNTIME_ROOT/.pugwash-reboot"
     done
 
+    stop_power_lid_helper
     post_gui_rewrites
 }
 
@@ -1136,12 +1205,14 @@ launch_port_script() {
     fi
     prepare_flip_joy_type_for_port
     chmod +x "$script_to_run" 2>/dev/null || true
+    start_power_lid_helper
     if launcher_requires_system_gl_stack "$source_script"; then
         echo "PMI_DIAG system_gl_stack_launcher=$source_script"
         PMI_LD_LIBRARY_STRATEGY=system-gl bash "$script_to_run"
     else
         bash "$script_to_run"
     fi
+    stop_power_lid_helper
 }
 
 trap cleanup EXIT INT TERM HUP QUIT

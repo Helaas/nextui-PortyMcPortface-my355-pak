@@ -498,6 +498,16 @@ static int install_runtime_support_tools(const install_layout *layout) {
     if (chmod(dst, 0755) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/pm-power-lid-watch", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-power-lid-watch", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
     if (install_armhf_runtime(layout) != 0)
         return -1;
 

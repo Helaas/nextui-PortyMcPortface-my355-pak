@@ -10,6 +10,7 @@ Porty McPortface is a standalone tool pak for [NextUI](https://github.com/LoveRe
 - Install and update PortMaster from a single NextUI tool pak.
 - Distributed as a single `.pakz`, with no additional software required on the device.
 - Rewrites the installed runtime for NextUI launchers and artwork support.
+- Adds NextUI-style power button and lid-close suspend handling for `my355` ports and the PortMaster GUI.
 - Bundles `box64` support and downloads the Spruce ARMHF rootfs needed by supported 32-bit x86 ports.
 
 ## Supported Platforms
@@ -68,6 +69,17 @@ The steps below update PortMaster while preserving your installed data and setti
 2. If a newer upstream TrimUI runtime is available, it will be shown on the main screen.
 3. Press `A` to update to the selected version, or `Y` to choose an older supported release first.
 4. If you need to refresh the managed runtime without changing versions, press `X` to reinstall it.
+
+## Power & Lid
+
+When running the managed `PORTS.pak` runtime on `my355`, Porty McPortface enables NextUI-style power handling for both the PortMaster GUI and launched ports:
+
+- Short-press `POWER` to suspend.
+- Close the lid to suspend.
+- Hold `POWER` for about 1 second to shut down.
+
+> [!WARNING]
+> Shutdown does **not** create a save state or resume point. Any unsaved progress since the last in-game save will be lost.
 
 ## Artwork
 
