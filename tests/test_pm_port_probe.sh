@@ -17,6 +17,20 @@ create_elf_stub() {
 	} >"$path"
 }
 
+create_armhf_elf_stub() {
+	path="$1"
+	shift
+	{
+		printf '\177ELF\001\001'
+		printf '\001'
+		dd if=/dev/zero bs=1 count=9 2>/dev/null
+		printf '\002\000\050\000'
+		for symbol in "$@"; do
+			printf '%s\n' "$symbol"
+		done
+	} >"$path"
+}
+
 port_with_gl="$tmpdir/port-with-gl"
 port_without_gl="$tmpdir/port-without-gl"
 mkdir -p "$port_with_gl/dir" "$port_with_gl/deep/nested" "$port_with_gl/lib/libarm64" "$port_without_gl"
@@ -52,3 +66,28 @@ printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/wrapped-bin	needs_default_
 output_without_gl="$("$helper" scan-aarch64-launch-port "$port_without_gl")"
 printf '%s\n' "$output_without_gl" | grep -Fx "PORT	$port_without_gl	has_bundled_native_gl_stack=0"
 printf '%s\n' "$output_without_gl" | grep -Fx "BIN	$port_without_gl/no-sdl	needs_default_audio_info=0	needs_pulse_simple=0	uses_sdl_gl_windowing=0	is_wrapper=0"
+
+armhf_port="$tmpdir/armhf-port"
+mkdir -p "$armhf_port/deep/nested"
+create_armhf_elf_stub "$armhf_port/gmloader"
+create_armhf_elf_stub "$armhf_port/bgdi"
+create_armhf_elf_stub "$armhf_port/deep/nested/too-deep"
+printf '#!/bin/sh\n# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1\nexit 0\n' >"$armhf_port/wrapped-bgdi"
+create_armhf_elf_stub "$armhf_port/wrapped-bgdi.original"
+create_elf_stub "$armhf_port/wrapped-bin-helper" PMI_ARMHF_EXEC_COMPAT_BINARY=1
+create_armhf_elf_stub "$armhf_port/wrapped-bin-helper.original"
+printf '#!/bin/sh\necho test\n' >"$armhf_port/script.sh"
+printf 'cache\n' >"$armhf_port/.pmi-armhf-port-probe-v1.tsv"
+printf 'not-elf\n' >"$armhf_port/SorR.dat"
+chmod +x "$armhf_port/gmloader" "$armhf_port/bgdi" "$armhf_port/wrapped-bgdi" "$armhf_port/wrapped-bin-helper" "$armhf_port/script.sh" "$armhf_port/SorR.dat"
+
+armhf_output="$("$helper" scan-armhf-launch-port "$armhf_port")"
+printf '%s\n' "$armhf_output" | grep -Fx "PORT	$armhf_port"
+printf '%s\n' "$armhf_output" | grep -Fx "BIN	$armhf_port/bgdi	is_wrapper=0"
+printf '%s\n' "$armhf_output" | grep -Fx "BIN	$armhf_port/gmloader	is_wrapper=0"
+printf '%s\n' "$armhf_output" | grep -Fx "BIN	$armhf_port/wrapped-bin-helper	is_wrapper=1"
+printf '%s\n' "$armhf_output" | grep -Fx "BIN	$armhf_port/wrapped-bgdi	is_wrapper=1"
+! printf '%s\n' "$armhf_output" | grep -Fq "$armhf_port/script.sh"
+! printf '%s\n' "$armhf_output" | grep -Fq "$armhf_port/.pmi-armhf-port-probe-v1.tsv"
+! printf '%s\n' "$armhf_output" | grep -Fq "$armhf_port/SorR.dat"
+! printf '%s\n' "$armhf_output" | grep -Fq "$armhf_port/deep/nested/too-deep"

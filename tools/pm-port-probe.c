@@ -16,14 +16,18 @@
 #define ELFMAG1 'E'
 #define ELFMAG2 'L'
 #define ELFMAG3 'F'
+#define ELFCLASS32 1
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
+#define EM_ARM 40
 #define SHT_STRTAB 3
 #define SHT_DYNSYM 11
 #define SHN_UNDEF 0
 
 #define SDL_WRAPPER_MARKER "# PMI_AARCH64_SDL_COMPAT_WRAPPER=1"
 #define NATIVE_WRAPPER_MARKER "# PMI_AARCH64_NATIVE_COMPAT_WRAPPER=1"
+#define ARMHF_WRAPPER_MARKER "# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1"
+#define ARMHF_BINARY_WRAPPER_MARKER "PMI_ARMHF_EXEC_COMPAT_BINARY=1"
 
 typedef struct {
     unsigned char e_ident[EI_NIDENT];
@@ -107,6 +111,7 @@ static const char *basename_ptr(const char *path);
 static int path_has_suffix(const char *path, const char *suffix);
 static int should_ignore_probe_artifact(const char *path);
 static int read_file(const char *path, unsigned char **out_data, size_t *out_size);
+static int is_supported_elf32_arm(const unsigned char *data, size_t size);
 static int is_supported_elf64(const unsigned char *data, size_t size);
 static int range_within_file(size_t file_size, uint64_t offset, uint64_t length);
 static int file_contains_bytes(const unsigned char *data, size_t size, const char *needle);
@@ -117,21 +122,32 @@ static char *join_path(const char *left, const char *right);
 static char *dup_string(const char *value);
 static int append_probe_result(probe_result_list *results, const probe_result *item);
 static int compare_probe_result(const void *lhs, const void *rhs);
-static int file_has_wrapper_marker(const char *path);
+static int file_has_aarch64_wrapper_marker(const char *path);
+static int file_has_armhf_wrapper_marker(const char *path);
 static int classify_candidate(const char *path, probe_result *out_result);
+static int classify_armhf_candidate(const char *path, probe_result *out_result);
 static int scan_launch_tree(const char *root, const char *dir_path, int depth, probe_result_list *results);
+static int scan_armhf_launch_tree(const char *dir_path, int depth, probe_result_list *results);
 static int scan_bundled_gl_tree(const char *dir_path, int depth, int *out_found);
 static void free_probe_results(probe_result_list *results);
 static int run_scan_aarch64_launch_port(const char *port_dir);
+static int run_scan_armhf_launch_port(const char *port_dir);
 
 int main(int argc, char **argv) {
-    if (argc != 3 || strcmp(argv[1], "scan-aarch64-launch-port") != 0) {
-        fprintf(stderr, "usage: %s scan-aarch64-launch-port <port_dir>\n",
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s <scan-aarch64-launch-port|scan-armhf-launch-port> <port_dir>\n",
                 (argc > 0 && argv[0] != NULL) ? argv[0] : "pm-port-probe");
         return 2;
     }
 
-    return run_scan_aarch64_launch_port(argv[2]);
+    if (strcmp(argv[1], "scan-aarch64-launch-port") == 0)
+        return run_scan_aarch64_launch_port(argv[2]);
+    if (strcmp(argv[1], "scan-armhf-launch-port") == 0)
+        return run_scan_armhf_launch_port(argv[2]);
+
+    fprintf(stderr, "usage: %s <scan-aarch64-launch-port|scan-armhf-launch-port> <port_dir>\n",
+            (argc > 0 && argv[0] != NULL) ? argv[0] : "pm-port-probe");
+    return 2;
 }
 
 static int run_scan_aarch64_launch_port(const char *port_dir) {
@@ -169,6 +185,32 @@ static int run_scan_aarch64_launch_port(const char *port_dir) {
                results.items[index].needs_default_audio_info ? 1 : 0,
                results.items[index].needs_pulse_simple ? 1 : 0,
                results.items[index].uses_sdl_gl_windowing ? 1 : 0,
+               results.items[index].is_wrapper ? 1 : 0);
+    }
+
+    free_probe_results(&results);
+    return 0;
+}
+
+static int run_scan_armhf_launch_port(const char *port_dir) {
+    probe_result_list results = {0};
+    struct stat st;
+    size_t index;
+
+    if (port_dir == NULL || stat(port_dir, &st) != 0 || !S_ISDIR(st.st_mode))
+        return 1;
+
+    if (scan_armhf_launch_tree(port_dir, 0, &results) != 0) {
+        free_probe_results(&results);
+        return 1;
+    }
+
+    qsort(results.items, results.count, sizeof(results.items[0]), compare_probe_result);
+
+    printf("PORT\t%s\n", port_dir);
+    for (index = 0; index < results.count; index++) {
+        printf("BIN\t%s\tis_wrapper=%d\n",
+               results.items[index].path,
                results.items[index].is_wrapper ? 1 : 0);
     }
 
@@ -282,7 +324,7 @@ static int compare_probe_result(const void *lhs, const void *rhs) {
     return strcmp(left->path, right->path);
 }
 
-static int file_has_wrapper_marker(const char *path) {
+static int file_has_aarch64_wrapper_marker(const char *path) {
     FILE *file;
     char line[256];
     int count = 0;
@@ -306,6 +348,39 @@ static int file_has_wrapper_marker(const char *path) {
     return 0;
 }
 
+static int file_has_armhf_wrapper_marker(const char *path) {
+    FILE *file;
+    unsigned char *data = NULL;
+    size_t size = 0;
+    char line[256];
+    int count = 0;
+
+    file = fopen(path, "r");
+    if (file == NULL)
+        return 0;
+
+    while (count < 2 && fgets(line, sizeof(line), file) != NULL) {
+        size_t line_len = strlen(line);
+        if (line_len > 0 && line[line_len - 1] == '\n')
+            line[line_len - 1] = '\0';
+        if (strcmp(line, ARMHF_WRAPPER_MARKER) == 0) {
+            fclose(file);
+            return 1;
+        }
+        count++;
+    }
+
+    fclose(file);
+    if (read_file(path, &data, &size) != 0)
+        return 0;
+    if (is_supported_elf64(data, size) && file_contains_bytes(data, size, ARMHF_BINARY_WRAPPER_MARKER)) {
+        free(data);
+        return 1;
+    }
+    free(data);
+    return 0;
+}
+
 static int classify_candidate(const char *path, probe_result *out_result) {
     char *inspect_path = NULL;
     unsigned char *data = NULL;
@@ -321,7 +396,7 @@ static int classify_candidate(const char *path, probe_result *out_result) {
     if (!stat_regular_file(path, &st))
         return 1;
 
-    if (file_has_wrapper_marker(path)) {
+    if (file_has_aarch64_wrapper_marker(path)) {
         char *original_path = malloc(strlen(path) + strlen(".original") + 1);
         if (original_path == NULL)
             return -1;
@@ -359,6 +434,65 @@ static int classify_candidate(const char *path, probe_result *out_result) {
         data, size,
         SDL_GL_WINDOWING_SYMBOLS,
         sizeof(SDL_GL_WINDOWING_SYMBOLS) / sizeof(SDL_GL_WINDOWING_SYMBOLS[0]));
+    result.is_wrapper = is_wrapper;
+
+    *out_result = result;
+    result.path = NULL;
+    ok = 0;
+
+cleanup:
+    free(result.path);
+    free(inspect_path);
+    free(data);
+    return ok;
+}
+
+static int classify_armhf_candidate(const char *path, probe_result *out_result) {
+    char *inspect_path = NULL;
+    unsigned char *data = NULL;
+    size_t size = 0;
+    struct stat st;
+    int is_wrapper = 0;
+    int ok = -1;
+    probe_result result = {0};
+
+    if (path == NULL || out_result == NULL || should_ignore_probe_artifact(path))
+        return 1;
+
+    if (!stat_regular_file(path, &st))
+        return 1;
+
+    if (file_has_armhf_wrapper_marker(path)) {
+        char *original_path = malloc(strlen(path) + strlen(".original") + 1);
+        if (original_path == NULL)
+            return -1;
+        strcpy(original_path, path);
+        strcat(original_path, ".original");
+        if (stat_regular_file(original_path, &st)) {
+            inspect_path = original_path;
+            is_wrapper = 1;
+        } else {
+            free(original_path);
+            return 1;
+        }
+    } else {
+        if ((st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) == 0)
+            return 1;
+        inspect_path = dup_string(path);
+        if (inspect_path == NULL)
+            return -1;
+    }
+
+    if (read_file(inspect_path, &data, &size) != 0)
+        goto cleanup;
+    if (!is_supported_elf32_arm(data, size)) {
+        ok = 1;
+        goto cleanup;
+    }
+
+    result.path = dup_string(path);
+    if (result.path == NULL)
+        goto cleanup;
     result.is_wrapper = is_wrapper;
 
     *out_result = result;
@@ -417,6 +551,72 @@ static int scan_launch_tree(const char *root, const char *dir_path, int depth, p
         if (S_ISREG(st.st_mode) && entry_depth <= 2) {
             probe_result item;
             int classify_result = classify_candidate(entry_path, &item);
+
+            if (classify_result < 0) {
+                free(entry_path);
+                closedir(dir);
+                return -1;
+            }
+            if (classify_result == 0) {
+                if (append_probe_result(results, &item) != 0) {
+                    free(item.path);
+                    free(entry_path);
+                    closedir(dir);
+                    return -1;
+                }
+            }
+        }
+
+        free(entry_path);
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+static int scan_armhf_launch_tree(const char *dir_path, int depth, probe_result_list *results) {
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(dir_path);
+    if (dir == NULL) {
+        if (errno == ENOENT)
+            return 0;
+        return -1;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        struct stat st;
+        char *entry_path;
+        int entry_depth = depth + 1;
+
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        entry_path = join_path(dir_path, entry->d_name);
+        if (entry_path == NULL) {
+            closedir(dir);
+            return -1;
+        }
+
+        if (stat(entry_path, &st) != 0) {
+            free(entry_path);
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            if (entry_depth < 2 && scan_armhf_launch_tree(entry_path, entry_depth, results) != 0) {
+                free(entry_path);
+                closedir(dir);
+                return -1;
+            }
+            free(entry_path);
+            continue;
+        }
+
+        if (S_ISREG(st.st_mode) && entry_depth <= 2) {
+            probe_result item;
+            int classify_result = classify_armhf_candidate(entry_path, &item);
 
             if (classify_result < 0) {
                 free(entry_path);
@@ -585,6 +785,20 @@ static int is_supported_elf64(const unsigned char *data, size_t size) {
         ehdr->e_ident[3] == ELFMAG3 &&
         ehdr->e_ident[EI_CLASS] == ELFCLASS64 &&
         ehdr->e_ident[EI_DATA] == ELFDATA2LSB;
+}
+
+static int is_supported_elf32_arm(const unsigned char *data, size_t size) {
+    if (data == NULL || size < 20)
+        return 0;
+
+    return data[0] == ELFMAG0 &&
+        data[1] == ELFMAG1 &&
+        data[2] == ELFMAG2 &&
+        data[3] == ELFMAG3 &&
+        data[EI_CLASS] == ELFCLASS32 &&
+        data[EI_DATA] == ELFDATA2LSB &&
+        data[18] == (unsigned char)(EM_ARM & 0xff) &&
+        data[19] == (unsigned char)((EM_ARM >> 8) & 0xff);
 }
 
 static int range_within_file(size_t file_size, uint64_t offset, uint64_t length) {

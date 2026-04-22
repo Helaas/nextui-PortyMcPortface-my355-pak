@@ -90,59 +90,107 @@ set -eu
 mode="${1:-}"
 port_dir="${2:-}"
 
-[ "$mode" = "scan-aarch64-launch-port" ] || exit 2
-
 if [ -n "${PMI_TEST_PORT_PROBE_LOG:-}" ]; then
 	printf '%s\n' "$port_dir" >>"$PMI_TEST_PORT_PROBE_LOG"
 fi
 
-has_gl=0
-if [ -d "$port_dir/lib" ] && find "$port_dir/lib" -maxdepth 2 -type f \
-	\( -name 'libEGL.so*' -o -name 'libGLES*.so*' -o -name 'libGL.so*' \
-	   -o -name 'libgbm.so*' -o -name 'libdrm.so*' -o -name 'libmali.so*' \) \
-	| grep -q .; then
-	has_gl=1
-fi
+case "$mode" in
+	scan-aarch64-launch-port)
+		has_gl=0
+		if [ -d "$port_dir/lib" ] && find "$port_dir/lib" -maxdepth 2 -type f \
+			\( -name 'libEGL.so*' -o -name 'libGLES*.so*' -o -name 'libGL.so*' \
+			   -o -name 'libgbm.so*' -o -name 'libdrm.so*' -o -name 'libmali.so*' \) \
+			| grep -q .; then
+			has_gl=1
+		fi
 
-printf 'PORT\t%s\thas_bundled_native_gl_stack=%s\n' "$port_dir" "$has_gl"
+		printf 'PORT\t%s\thas_bundled_native_gl_stack=%s\n' "$port_dir" "$has_gl"
 
-find "$port_dir" -maxdepth 2 -type f | LC_ALL=C sort | while IFS= read -r file || [ -n "$file" ]; do
-	[ -n "$file" ] || continue
-	case "$file" in
-		*.pmi-*|*.sh|*.bash|*.so|*.so.*|*.original)
-			continue
-			;;
-	esac
+		find "$port_dir" -maxdepth 2 -type f | LC_ALL=C sort | while IFS= read -r file || [ -n "$file" ]; do
+			[ -n "$file" ] || continue
+			case "$file" in
+				*.pmi-*|*.sh|*.bash|*.so|*.so.*|*.original)
+					continue
+					;;
+			esac
 
-	is_wrapper=0
-	inspect="$file"
-	if /bin/head -n 2 "$file" 2>/dev/null | /usr/bin/grep -Eq '^# PMI_AARCH64_(SDL_COMPAT|NATIVE_COMPAT)_WRAPPER=1$'; then
-		inspect="${file}.original"
-		[ -f "$inspect" ] || continue
-		is_wrapper=1
-	fi
+			is_wrapper=0
+			inspect="$file"
+			if /bin/head -n 2 "$file" 2>/dev/null | /usr/bin/grep -Eq '^# PMI_AARCH64_(SDL_COMPAT|NATIVE_COMPAT)_WRAPPER=1$'; then
+				inspect="${file}.original"
+				[ -f "$inspect" ] || continue
+				is_wrapper=1
+			fi
 
-	header=$(/bin/dd if="$inspect" bs=1 count=5 2>/dev/null | /usr/bin/od -An -tx1 | tr -d ' \n')
-	[ "$header" = "7f454c4602" ] || continue
+			header=$(/bin/dd if="$inspect" bs=1 count=5 2>/dev/null | /usr/bin/od -An -tx1 | tr -d ' \n')
+			[ "$header" = "7f454c4602" ] || continue
 
-	needs_default_audio_info=0
-	needs_pulse_simple=0
-	uses_sdl_gl_windowing=0
-	if /usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$inspect"; then
-		needs_default_audio_info=1
-	fi
-	if /usr/bin/grep -aq 'libpulse-simple.so.0' "$inspect"; then
-		needs_pulse_simple=1
-	fi
-	if /usr/bin/grep -aq 'SDL_GL_CreateContext' "$inspect" && /usr/bin/grep -aq 'SDL_CreateWindow' "$inspect"; then
-		uses_sdl_gl_windowing=1
-	fi
+			needs_default_audio_info=0
+			needs_pulse_simple=0
+			uses_sdl_gl_windowing=0
+			if /usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$inspect"; then
+				needs_default_audio_info=1
+			fi
+			if /usr/bin/grep -aq 'libpulse-simple.so.0' "$inspect"; then
+				needs_pulse_simple=1
+			fi
+			if /usr/bin/grep -aq 'SDL_GL_CreateContext' "$inspect" && /usr/bin/grep -aq 'SDL_CreateWindow' "$inspect"; then
+				uses_sdl_gl_windowing=1
+			fi
 
-	printf 'BIN\t%s\tneeds_default_audio_info=%s\tneeds_pulse_simple=%s\tuses_sdl_gl_windowing=%s\tis_wrapper=%s\n' \
-		"$file" "$needs_default_audio_info" "$needs_pulse_simple" "$uses_sdl_gl_windowing" "$is_wrapper"
-done
+			printf 'BIN\t%s\tneeds_default_audio_info=%s\tneeds_pulse_simple=%s\tuses_sdl_gl_windowing=%s\tis_wrapper=%s\n' \
+				"$file" "$needs_default_audio_info" "$needs_pulse_simple" "$uses_sdl_gl_windowing" "$is_wrapper"
+		done
+		;;
+	scan-armhf-launch-port)
+		printf 'PORT\t%s\n' "$port_dir"
+
+		find "$port_dir" -maxdepth 2 -type f | LC_ALL=C sort | while IFS= read -r file || [ -n "$file" ]; do
+			[ -n "$file" ] || continue
+			case "$file" in
+				*.pmi-*|*.sh|*.bash|*.so|*.so.*|*.original)
+					continue
+					;;
+			esac
+
+			is_wrapper=0
+			inspect="$file"
+			if /bin/head -n 2 "$file" 2>/dev/null | /usr/bin/grep -Eq '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$' || \
+			   /usr/bin/grep -aq 'PMI_ARMHF_EXEC_COMPAT_BINARY=1' "$file" 2>/dev/null; then
+				inspect="${file}.original"
+				[ -f "$inspect" ] || continue
+				is_wrapper=1
+			else
+				[ -x "$file" ] || continue
+			fi
+
+			header=$(/bin/dd if="$inspect" bs=1 count=20 2>/dev/null | /usr/bin/od -An -tx1 | tr -s ' ')
+			set -- $header
+			[ "$#" -ge 20 ] || continue
+			[ "$1" = "7f" ] || continue
+			[ "$2" = "45" ] || continue
+			[ "$3" = "4c" ] || continue
+			[ "$4" = "46" ] || continue
+			[ "$5" = "01" ] || continue
+			[ "${19}" = "28" ] || continue
+			[ "${20}" = "00" ] || continue
+
+			printf 'BIN\t%s\tis_wrapper=%s\n' "$file" "$is_wrapper"
+		done
+		;;
+	*)
+		exit 2
+		;;
+esac
 EOF
 	chmod +x "$pak_dir/bin/pm-port-probe"
+
+	cat >"$pak_dir/bin/pm-armhf-exec-wrapper" <<'EOF'
+#!/bin/sh
+echo 'PMI_ARMHF_EXEC_COMPAT_BINARY=1'
+exit 0
+EOF
+	chmod +x "$pak_dir/bin/pm-armhf-exec-wrapper"
 
 	cat >"$pak_dir/files/control.txt" <<EOF
 #!/bin/bash
@@ -442,12 +490,11 @@ test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader.original"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi.original"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/.pmi-armhf-port-probe-v1.tsv"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat"
 test ! -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat.original"
-grep -q '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$' "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
-grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
-grep -q '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$' "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
-grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/bin/pm-armhf-exec-wrapper" "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/bin/pm-armhf-exec-wrapper" "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
 
 create_direct_launch_tree "$joy_override_root"
 printf '0 [-1=none 0=miyoo 1=xbox]\n' >"$joy_override_root/joy_type"

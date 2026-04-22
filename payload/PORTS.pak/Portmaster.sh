@@ -324,13 +324,23 @@ ensure_runtime_bootstrap() {
         mkdir -p "$PAK_DIR/lib"
         cp -f "$PAK_DIR/files/libffi.so.7" "$PAK_DIR/lib/libffi.so.7"
     fi
-    if ! command -v pkill >/dev/null 2>&1; then
+if ! command -v pkill >/dev/null 2>&1; then
         cat >"$PAK_DIR/bin/pkill" <<'EOF'
 #!/bin/sh
 set -eu
 
+signal_opt=""
+pattern=""
+self_pid="$$"
+
 if [ "${1:-}" = "-f" ] && [ $# -ge 2 ]; then
     pattern="$2"
+elif [ "${1:-}" != "" ] && [ "${2:-}" = "-f" ] && [ $# -ge 3 ]; then
+    signal_opt="$1"
+    pattern="$3"
+fi
+
+if [ -n "$pattern" ]; then
     self_pid="$$"
     if ! command -v pgrep >/dev/null 2>&1; then
         exit 0
@@ -339,7 +349,11 @@ if [ "${1:-}" = "-f" ] && [ $# -ge 2 ]; then
     pgrep -f "$pattern" | while IFS= read -r pid || [ -n "$pid" ]; do
         [ -n "$pid" ] || continue
         [ "$pid" = "$self_pid" ] && continue
-        kill "$pid" >/dev/null 2>&1 || true
+        if [ -n "$signal_opt" ]; then
+            kill "$signal_opt" "$pid" >/dev/null 2>&1 || true
+        else
+            kill "$pid" >/dev/null 2>&1 || true
+        fi
     done
     exit 0
 fi
@@ -448,6 +462,11 @@ port_has_arch() {
 
 launcher_requires_armhf() {
     local launcher_path="$1"
+    launcher_armhf_port_dir "$launcher_path" >/dev/null 2>&1
+}
+
+launcher_armhf_port_dir() {
+    local launcher_path="$1"
     local port_json shell_name
 
     for port_json in "$REAL_PORTS_DIR"/*/port.json; do
@@ -455,6 +474,7 @@ launcher_requires_armhf() {
         shell_name=$(port_shell_from_json "$port_json")
         [ -n "$shell_name" ] || continue
         if [ "$REAL_PORTS_DIR/$shell_name" = "$launcher_path" ] && port_has_arch "$port_json" "armhf"; then
+            dirname "$port_json"
             return 0
         fi
     done
@@ -538,6 +558,12 @@ port_probe_cache_path() {
     printf '%s/.pmi-port-probe-v2.tsv\n' "$port_dir"
 }
 
+armhf_probe_cache_path() {
+    local port_dir="$1"
+
+    printf '%s/.pmi-armhf-port-probe-v1.tsv\n' "$port_dir"
+}
+
 cleanup_legacy_port_probe_artifacts() {
     local port_dir="$1"
 
@@ -604,6 +630,62 @@ refresh_port_probe_cache() {
 
     tmp_cache="${cache_path}.tmp.$$"
     if "$helper" scan-aarch64-launch-port "$port_dir" >"$tmp_cache"; then
+        mv -f "$tmp_cache" "$cache_path"
+        return 0
+    fi
+
+    rm -f "$tmp_cache" 2>/dev/null || true
+    return 1
+}
+
+armhf_probe_cache_is_stale() {
+    local port_dir="$1"
+    local cache_path="$2"
+    local helper
+    local cache_source="${PAK_DIR:-}/Portmaster.sh"
+
+    [ -f "$cache_path" ] || return 0
+
+    if find "$port_dir" -maxdepth 2 -type f -newer "$cache_path" | grep -q .; then
+        return 0
+    fi
+
+    helper=$(port_probe_helper_path)
+    if [ -e "$helper" ] && [ "$helper" -nt "$cache_path" ]; then
+        return 0
+    fi
+
+    if [ -e "$cache_source" ] && [ "$cache_source" -nt "$cache_path" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
+refresh_armhf_probe_cache() {
+    local port_dir="$1"
+    local cache_path
+    local helper
+    local tmp_cache
+
+    [ -d "$port_dir" ] || return 1
+
+    cache_path=$(armhf_probe_cache_path "$port_dir")
+    if ! armhf_probe_cache_is_stale "$port_dir" "$cache_path"; then
+        return 0
+    fi
+
+    helper=$(port_probe_helper_path)
+    if [ ! -x "$helper" ]; then
+        if [ "${PMI_ARMHF_PROBE_HELPER_WARNED:-0}" != "1" ]; then
+            PMI_ARMHF_PROBE_HELPER_WARNED=1
+            echo "PMI_WARN armhf_probe_helper_missing=$helper"
+        fi
+        return 1
+    fi
+
+    tmp_cache="${cache_path}.tmp.$$"
+    if "$helper" scan-armhf-launch-port "$port_dir" >"$tmp_cache"; then
         mv -f "$tmp_cache" "$cache_path"
         return 0
     fi
@@ -704,6 +786,7 @@ EOF
 write_armhf_exec_compat_wrapper() {
     local wrapper_path="$1"
     local wrapper_dir wrapper_name original_path
+    local helper_path="$PAK_DIR/bin/pm-armhf-exec-wrapper"
 
     wrapper_dir=$(dirname "$wrapper_path")
     wrapper_name=$(basename "$wrapper_path")
@@ -713,6 +796,15 @@ write_armhf_exec_compat_wrapper() {
         mv "$wrapper_path" "$original_path"
     fi
 
+    if [ -x "$helper_path" ]; then
+        if [ ! -f "$wrapper_path" ] || ! cmp -s "$helper_path" "$wrapper_path" 2>/dev/null; then
+            cp -f "$helper_path" "$wrapper_path"
+            chmod +x "$wrapper_path" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
+    echo "PMI_WARN armhf_exec_wrapper_helper_missing=$helper_path"
     cat >"$wrapper_path" <<'EOF'
 #!/bin/sh
 # PMI_ARMHF_EXEC_COMPAT_WRAPPER=1
@@ -774,54 +866,9 @@ if [ -z "$PAK_DIR" ] || [ ! -x "$REAL_BINARY" ] || [ ! -f "$ARMHF_LOADER" ]; the
     exit 1
 fi
 
-exec "$ARMHF_LOADER" --library-path "$ARMHF_EFFECTIVE_LD_LIBRARY_PATH" "$REAL_BINARY" "$@"
+exec "$ARMHF_LOADER" --argv0 "$SELF_NAME" --library-path "$ARMHF_EFFECTIVE_LD_LIBRARY_PATH" "$REAL_BINARY" "$@"
 EOF
     chmod +x "$wrapper_path" 2>/dev/null || true
-}
-
-is_armhf_exec_wrapper() {
-    local file="$1"
-
-    [ -f "$file" ] || return 1
-    head -n 2 "$file" 2>/dev/null | grep -Eq '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$'
-}
-
-is_armhf_elf_binary() {
-    local file="$1"
-
-    [ -f "$file" ] || return 1
-
-    set -- $(dd if="$file" bs=1 count=20 2>/dev/null | od -An -tx1 -v 2>/dev/null)
-    [ $# -ge 20 ] || return 1
-
-    [ "$1" = "7f" ] &&
-        [ "$2" = "45" ] &&
-        [ "$3" = "4c" ] &&
-        [ "$4" = "46" ] &&
-        [ "$5" = "01" ] &&
-        [ "${19}" = "28" ] &&
-        [ "${20}" = "00" ]
-}
-
-is_armhf_launch_binary() {
-    local file="$1"
-    local base_name
-
-    [ -f "$file" ] || return 1
-    base_name=$(basename "$file")
-
-    case "$base_name" in
-        *.sh|*.bash|*.so|*.so.*|*.original)
-            return 1
-            ;;
-    esac
-
-    if is_armhf_exec_wrapper "$file"; then
-        return 0
-    fi
-
-    [ -x "$file" ] || return 1
-    is_armhf_elf_binary "$file"
 }
 
 refresh_box_runtime_wrappers() {
@@ -843,23 +890,69 @@ refresh_box_runtime_wrappers() {
     done
 }
 
+process_armhf_binary_wrappers_for_port() {
+    local port_dir="$1"
+    local cache_path
+    local record_type record_path field1
+    local file
+
+    [ -d "$port_dir" ] || return 0
+
+    if refresh_armhf_probe_cache "$port_dir"; then
+        cache_path=$(armhf_probe_cache_path "$port_dir")
+        if [ -f "$cache_path" ]; then
+            while IFS="$(printf '\t')" read -r record_type record_path field1 || [ -n "${record_type:-}" ]; do
+                [ "$record_type" = "BIN" ] || continue
+                [ -f "$record_path" ] || continue
+                write_armhf_exec_compat_wrapper "$record_path"
+            done < "$cache_path"
+            return 0
+        fi
+    fi
+
+    find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+        [ -n "$file" ] || continue
+        case "$(basename "$file")" in
+            *.sh|*.bash|*.so|*.so.*|*.original)
+                continue
+                ;;
+        esac
+        set -- $(dd if="$file" bs=1 count=20 2>/dev/null | od -An -tx1 -v 2>/dev/null)
+        [ $# -ge 20 ] || continue
+        [ "$1" = "7f" ] || continue
+        [ "$2" = "45" ] || continue
+        [ "$3" = "4c" ] || continue
+        [ "$4" = "46" ] || continue
+        [ "$5" = "01" ] || continue
+        [ "${19}" = "28" ] || continue
+        [ "${20}" = "00" ] || continue
+        write_armhf_exec_compat_wrapper "$file"
+    done
+}
+
 refresh_armhf_binary_wrappers() {
     local search_path="$1"
-    local port_json port_dir file
+    local port_json port_dir
 
     [ -d "$search_path" ] || return 0
 
     for port_json in "$search_path"/*/port.json; do
         [ -f "$port_json" ] || continue
         port_has_arch "$port_json" "armhf" || continue
-
         port_dir=$(dirname "$port_json")
-        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
-            [ -n "$file" ] || continue
-            is_armhf_launch_binary "$file" || continue
-            write_armhf_exec_compat_wrapper "$file"
-        done
+        process_armhf_binary_wrappers_for_port "$port_dir"
     done
+}
+
+refresh_armhf_binary_wrappers_for_launcher() {
+    local launcher_path="$1"
+    local port_dir
+
+    if ! port_dir=$(launcher_armhf_port_dir "$launcher_path"); then
+        return 0
+    fi
+
+    process_armhf_binary_wrappers_for_port "$port_dir"
 }
 
 default_sdl2_candidate_path() {
@@ -1347,7 +1440,6 @@ post_gui_rewrites() {
     heal_installed_port_launchers
     apply_port_arch_rewrites
     refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
-    refresh_armhf_binary_wrappers "$REAL_PORTS_DIR"
     process_squashfs_files "$REAL_PORTS_DIR"
     copy_game_scripts
     copy_artwork_to_media
@@ -1376,17 +1468,18 @@ launch_gui() {
 launch_port_script() {
     local source_script="${PMI_PORT_SCRIPT:-$ROM_PATH}"
     local script_to_run
+    local armhf_port_dir
 
     heal_installed_port_launchers
     apply_port_arch_rewrites
     refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
-    refresh_armhf_binary_wrappers "$REAL_PORTS_DIR"
+    refresh_armhf_binary_wrappers_for_launcher "$source_script"
     refresh_aarch64_sdl_compat_for_launcher "$source_script"
     script_to_run=$(stage_launch_script "$source_script")
     echo "PMI_DIAG selected_port_script=$source_script"
     echo "PMI_DIAG rewritten_launch_path=$script_to_run"
-    if launcher_requires_armhf "$source_script"; then
-        seed_x86_runtime_libs "$REAL_PORTS_DIR"
+    if armhf_port_dir=$(launcher_armhf_port_dir "$source_script"); then
+        seed_x86_runtime_libs "$armhf_port_dir"
     fi
     if launcher_requires_flip_libmali "$source_script"; then
         bind_flip_libmali
