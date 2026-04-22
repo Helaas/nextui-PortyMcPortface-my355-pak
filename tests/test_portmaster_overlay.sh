@@ -60,6 +60,9 @@ cat >"$pak_dir/files/gamecontrollerdb.txt" <<'EOF'
 03000000de2800000112000001000000,Steam Controller,a:b0,b:b1,start:b7,platform:Linux,
 EOF
 
+cp "$pak_dir/files/gamecontrollerdb.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
+touch -t 202001010000 "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
+
 cat >"$emu_dir/device_info.txt" <<'EOF'
 ANALOG_STICKS=2
 DEVICE_ARCH=aarch64

@@ -357,6 +357,14 @@ run_direct_launch() {
 	run_direct_launch_for_script "$1" "TestPort.sh"
 }
 
+staged_launch_path_for() {
+	root="$1"
+	launcher_name="$2"
+	source_script="$root/Roms/Ports (PORTS)/.ports/$launcher_name"
+	staged_id="$(printf '%s' "$source_script" | cksum | awk '{print $1}')"
+	printf '%s/.ports_temp/launchers/%s.%s\n' "$root" "$launcher_name" "$staged_id"
+}
+
 add_aarch64_sdl_fixture() {
 	root="$1"
 	real_ports_dir="$root/Roms/Ports (PORTS)/.ports"
@@ -465,7 +473,8 @@ aarch64_wrap_root="$(mktemp -d)"
 aarch64_skip_root="$(mktemp -d)"
 native_gl_root="$(mktemp -d)"
 bundled_gl_root="$(mktemp -d)"
-trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root"' EXIT
+multi_port_root="$(mktemp -d)"
+trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root" "$multi_port_root"' EXIT
 
 create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
@@ -476,7 +485,16 @@ test ! -f "$failure_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp"
 test ! -e "$failure_root/Emus/my355/PORTS.pak/lib/libtheoradec.so.1"
 
 create_direct_launch_tree "$success_root"
-run_direct_launch "$success_root"
+success_staged="$(staged_launch_path_for "$success_root" "TestPort.sh")"
+legacy_staged_conflict="$success_root/.ports_temp/launchers/TestPort.sh"
+mkdir -p "$(dirname "$legacy_staged_conflict")"
+cat >"$legacy_staged_conflict" <<EOF
+#!/bin/sh
+printf '%s\n' legacy-staged-conflict >"$success_root/legacy-staged-conflict.txt"
+exit 99
+EOF
+chmod +x "$legacy_staged_conflict"
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
 test -f "$success_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp"
 test -d "$success_root/Emus/my355/PORTS.pak/lib/python3.11"
 test -f "$success_root/Emus/my355/PORTS.pak/lib/python3.11/module.py"
@@ -491,10 +509,42 @@ test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader.original"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi.original"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/.pmi-armhf-port-probe-v1.tsv"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/.pmi-launch-index-v1.tsv"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp"
+test -f "$success_root/Emus/my355/PORTS.pak/PortMaster/.pmi-overlay-sync-v1.stamp"
+test -f "$success_staged"
+test ! -f "$success_root/legacy-staged-conflict.txt"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat"
 test ! -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat.original"
 /usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/bin/pm-armhf-exec-wrapper" "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
 /usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/bin/pm-armhf-exec-wrapper" "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
+grep -q "PMI_DIAG runtime_bootstrap_refresh=$success_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG overlay_sync_refresh=$success_root/Emus/my355/PORTS.pak/PortMaster/.pmi-overlay-sync-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG global_port_repairs_refresh=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG staged_launch_refreshed=$success_staged" "$success_root/PORTS.txt"
+test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
+
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
+grep -q "PMI_DIAG runtime_bootstrap_cached=$success_root/Emus/my355/PORTS.pak/lib/.portmaster-lib-bundle.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG overlay_sync_cached=$success_root/Emus/my355/PORTS.pak/PortMaster/.pmi-overlay-sync-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG global_port_repairs_cached=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG staged_launch_reused=$success_staged" "$success_root/PORTS.txt"
+test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
+
+sleep 1
+printf '# control refresh\n' >>"$success_root/Emus/my355/PORTS.pak/files/control.txt"
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
+grep -q "PMI_DIAG overlay_sync_refresh=$success_root/Emus/my355/PORTS.pak/PortMaster/.pmi-overlay-sync-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG global_port_repairs_cached=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG staged_launch_refreshed=$success_staged" "$success_root/PORTS.txt"
+test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
+
+sleep 1
+printf '# launcher refresh\n' >>"$success_root/Roms/Ports (PORTS)/.ports/TestPort.sh"
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
+grep -q "PMI_DIAG global_port_repairs_refresh=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG staged_launch_refreshed=$success_staged" "$success_root/PORTS.txt"
+test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
 
 create_direct_launch_tree "$joy_override_root"
 printf '0 [-1=none 0=miyoo 1=xbox]\n' >"$joy_override_root/joy_type"
@@ -547,10 +597,17 @@ test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/.pmi-port-prob
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/.pmi-port-probe-v2.tsv"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat.pmi-aarch64-sdl-compat"
-test "$(wc -l < "$aarch64_wrap_root/port-probe.log" | tr -d ' ')" = "2"
+test "$(wc -l < "$aarch64_wrap_root/port-probe.log" | tr -d ' ')" = "1"
 grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl sdl=1 pulse=0" "$aarch64_wrap_root/PORTS.txt"
 grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse sdl=0 pulse=1" "$aarch64_wrap_root/PORTS.txt"
 grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both sdl=1 pulse=1" "$aarch64_wrap_root/PORTS.txt"
+PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_PORT_PROBE_LOG="$aarch64_wrap_root/port-probe.log" \
+run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
+test "$(wc -l < "$aarch64_wrap_root/port-probe.log" | tr -d ' ')" = "1"
+
+sleep 1
+touch "$aarch64_wrap_root/Emus/my355/PORTS.pak/bin/pm-port-probe"
 PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
 PMI_TEST_PORT_PROBE_LOG="$aarch64_wrap_root/port-probe.log" \
 run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
@@ -628,3 +685,16 @@ PMI_SDL2_SYSTEM_LIB='' PMI_TEST_PORT_PROBE_LOG="$bundled_gl_root/port-probe.log"
 ! grep -q 'PMI_DIAG system_gl_stack_launcher=' "$bundled_gl_root/PORTS.txt"
 grep -q "^$bundled_gl_root/.ports_temp/ports/bundledgl/lib/libarm64:$bundled_gl_root/Emus/my355/PORTS.pak/lib$" "$bundled_gl_root/.ports_temp/bundled-gl-ld.txt"
 test "$(wc -l < "$bundled_gl_root/port-probe.log" | tr -d ' ')" = "1"
+
+create_direct_launch_tree "$multi_port_root"
+add_aarch64_sdl_fixture "$multi_port_root"
+printf 'system-sdl-without-symbol\n' >"$multi_port_root/system-sdl/libSDL2-2.0.so.0"
+PMI_SDL2_SYSTEM_LIB="$multi_port_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_PORT_PROBE_LOG="$multi_port_root/port-probe.log" \
+run_direct_launch "$multi_port_root"
+test "$(wc -l < "$multi_port_root/port-probe.log" | tr -d ' ')" = "1"
+PMI_SDL2_SYSTEM_LIB="$multi_port_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_PORT_PROBE_LOG="$multi_port_root/port-probe.log" \
+run_direct_launch_for_script "$multi_port_root" "TestAarch64.sh"
+grep -q "PMI_DIAG global_port_repairs_cached=$multi_port_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$multi_port_root/PORTS.txt"
+test "$(wc -l < "$multi_port_root/port-probe.log" | tr -d ' ')" = "2"

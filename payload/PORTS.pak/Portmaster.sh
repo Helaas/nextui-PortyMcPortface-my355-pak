@@ -21,6 +21,16 @@ JOY_TYPE_ORIGINAL=""
 JOY_TYPE_RESTORE_NEEDED=0
 PMI_POWER_LID_HELPER_PID=""
 PMI_POWER_LID_HELPER_PIDFILE="/tmp/pmi-power-lid-watch.pid"
+PMI_LAUNCH_INDEX_READY=0
+PMI_LAUNCHER_METADATA_SOURCE=""
+PMI_LAUNCHER_METADATA_PORT_DIR=""
+PMI_LAUNCHER_METADATA_ARMHF=0
+PMI_LAUNCHER_METADATA_AARCH64=0
+PMI_LAUNCHER_METADATA_NEEDS_FLIP_LIBMALI=0
+PMI_AARCH64_PROBE_PORT_DIR=""
+PMI_AARCH64_PROBE_CACHE_PATH=""
+PMI_AARCH64_PROBE_HAS_BUNDLED_NATIVE_GL=0
+PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL=0
 
 mkdir -p "$PM_RUNTIME_ROOT"
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -194,6 +204,32 @@ ensure_runtime_config() {
     fi
 }
 
+overlay_sync_stamp_path() {
+    printf '%s/.pmi-overlay-sync-v1.stamp\n' "$PM_RUNTIME_ROOT"
+}
+
+launcher_index_path() {
+    printf '%s/.pmi-launch-index-v1.tsv\n' "$REAL_PORTS_DIR"
+}
+
+global_port_repairs_stamp_path() {
+    printf '%s/.pmi-global-repairs-v1.stamp\n' "$REAL_PORTS_DIR"
+}
+
+touch_stamp_file() {
+    local stamp_path="$1"
+
+    mkdir -p "$(dirname "$stamp_path")"
+    : >"$stamp_path"
+}
+
+ensure_exec_file() {
+    local file_path="$1"
+
+    [ -f "$file_path" ] || return 0
+    [ -x "$file_path" ] || chmod +x "$file_path" 2>/dev/null || true
+}
+
 sync_overlay_file() {
     local src="$1"
     local dst="$2"
@@ -201,6 +237,17 @@ sync_overlay_file() {
     [ -f "$src" ] || return 0
     mkdir -p "$(dirname "$dst")"
     cp -f "$src" "$dst"
+}
+
+sync_overlay_file_if_needed() {
+    local src="$1"
+    local dst="$2"
+
+    [ -f "$src" ] || return 0
+    mkdir -p "$(dirname "$dst")"
+    if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst" 2>/dev/null; then
+        cp -f "$src" "$dst"
+    fi
 }
 
 sync_overlay_tree() {
@@ -212,21 +259,70 @@ sync_overlay_tree() {
     cp -Rf "$src_dir"/. "$dst_dir"/
 }
 
+overlay_file_is_stale() {
+    local src="$1"
+    local dst="$2"
+    local stamp_path="$3"
+
+    [ -f "$src" ] || return 1
+    [ -f "$stamp_path" ] || return 0
+    [ -f "$dst" ] || return 0
+    if [ "$src" -nt "$stamp_path" ]; then
+        return 0
+    fi
+    if ! cmp -s "$src" "$dst" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+runtime_overlay_is_stale() {
+    local xdg_pm_dir="$1"
+    local stamp_path
+
+    stamp_path=$(overlay_sync_stamp_path)
+    [ -f "$stamp_path" ] || return 0
+
+    overlay_file_is_stale "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/control.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/miyoo/control.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.sh" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/config.py" "$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/gamecontrollerdb.txt" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/control.txt" "$xdg_pm_dir/control.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$PAK_DIR/files/gamecontrollerdb.txt" "$xdg_pm_dir/gamecontrollerdb.txt" "$stamp_path" && return 0
+
+    [ -x "$PM_RUNTIME_ROOT/PortMaster.txt" ] || return 0
+    [ -x "$PM_RUNTIME_ROOT/PortMaster.sh" ] || return 0
+    [ -x "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt" ] || return 0
+    return 1
+}
+
 ensure_runtime_parity_overlay() {
     local xdg_pm_dir="$XDG_DATA_HOME/PortMaster"
+    local stamp_path
 
-    sync_overlay_file "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/control.txt"
-    sync_overlay_file "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/miyoo/control.txt"
-    sync_overlay_file "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.txt"
-    sync_overlay_file "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.sh"
-    sync_overlay_file "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt"
-    sync_overlay_file "$PAK_DIR/files/config.py" "$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py"
-    sync_overlay_file "$PAK_DIR/files/gamecontrollerdb.txt" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
-    sync_overlay_file "$PAK_DIR/files/control.txt" "$xdg_pm_dir/control.txt"
-    sync_overlay_file "$PAK_DIR/files/gamecontrollerdb.txt" "$xdg_pm_dir/gamecontrollerdb.txt"
-    chmod +x "$PM_RUNTIME_ROOT/PortMaster.txt" 2>/dev/null || true
-    chmod +x "$PM_RUNTIME_ROOT/PortMaster.sh" 2>/dev/null || true
-    chmod +x "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt" 2>/dev/null || true
+    mkdir -p "$xdg_pm_dir"
+    stamp_path=$(overlay_sync_stamp_path)
+    if runtime_overlay_is_stale "$xdg_pm_dir"; then
+        sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/control.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/miyoo/control.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.sh"
+        sync_overlay_file_if_needed "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/config.py" "$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py"
+        sync_overlay_file_if_needed "$PAK_DIR/files/gamecontrollerdb.txt" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$xdg_pm_dir/control.txt"
+        sync_overlay_file_if_needed "$PAK_DIR/files/gamecontrollerdb.txt" "$xdg_pm_dir/gamecontrollerdb.txt"
+        touch_stamp_file "$stamp_path"
+        echo "PMI_DIAG overlay_sync_refresh=$stamp_path"
+    else
+        echo "PMI_DIAG overlay_sync_cached=$stamp_path"
+    fi
+    ensure_exec_file "$PM_RUNTIME_ROOT/PortMaster.txt"
+    ensure_exec_file "$PM_RUNTIME_ROOT/PortMaster.sh"
+    ensure_exec_file "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt"
 
     echo "PMI_DIAG overlay_runtime_root=$PM_RUNTIME_ROOT"
     echo "PMI_DIAG overlay_xdg_root=$xdg_pm_dir"
@@ -297,6 +393,7 @@ unpack_tar() {
 
 ensure_runtime_bootstrap() {
     local lib_bootstrap_stamp="$PAK_DIR/lib/.portmaster-lib-bundle.stamp"
+    local needs_runtime_refresh=0
 
     if [ ! -x "$PAK_DIR/bin/python3" ]; then
         if ! unpack_tar "$PAK_DIR/files/bin.tar.gz" "$PAK_DIR/bin"; then
@@ -316,16 +413,15 @@ ensure_runtime_bootstrap() {
             echo "PMI_ERROR runtime lib bundle incomplete after bootstrap"
             return 1
         fi
-        mkdir -p "$PAK_DIR/lib"
-        : >"$lib_bootstrap_stamp"
+        needs_runtime_refresh=1
     fi
-    sanitize_runtime_lib_dir
-    if [ -f "$PAK_DIR/files/libffi.so.7" ] && [ ! -f "$PAK_DIR/lib/libffi.so.7" ]; then
-        mkdir -p "$PAK_DIR/lib"
-        cp -f "$PAK_DIR/files/libffi.so.7" "$PAK_DIR/lib/libffi.so.7"
+    if [ ! -f "$lib_bootstrap_stamp" ] || [ "$PAK_DIR/Portmaster.sh" -nt "$lib_bootstrap_stamp" ]; then
+        needs_runtime_refresh=1
     fi
-if ! command -v pkill >/dev/null 2>&1; then
-        cat >"$PAK_DIR/bin/pkill" <<'EOF'
+    if [ "$needs_runtime_refresh" = "1" ]; then
+        sanitize_runtime_lib_dir
+        if ! command -v pkill >/dev/null 2>&1; then
+            cat >"$PAK_DIR/bin/pkill" <<'EOF'
 #!/bin/sh
 set -eu
 
@@ -363,9 +459,17 @@ if command -v killall >/dev/null 2>&1; then
 fi
 exit 0
 EOF
-        chmod +x "$PAK_DIR/bin/pkill"
+            chmod +x "$PAK_DIR/bin/pkill"
+        fi
+        touch_stamp_file "$lib_bootstrap_stamp"
+        echo "PMI_DIAG runtime_bootstrap_refresh=$lib_bootstrap_stamp"
+    else
+        echo "PMI_DIAG runtime_bootstrap_cached=$lib_bootstrap_stamp"
     fi
-
+    if [ -f "$PAK_DIR/files/libffi.so.7" ] && [ ! -f "$PAK_DIR/lib/libffi.so.7" ]; then
+        mkdir -p "$PAK_DIR/lib"
+        cp -f "$PAK_DIR/files/libffi.so.7" "$PAK_DIR/lib/libffi.so.7"
+    fi
 }
 
 unpack_pylibs() {
@@ -430,12 +534,24 @@ heal_installed_port_launchers() {
 stage_launch_script() {
     local source_script="$1"
     local staged_dir="$TEMP_DATA_DIR/launchers"
-    local staged_script="$staged_dir/$(basename "$source_script")"
+    local staged_id
+    local staged_script
+
+    staged_id=$(printf '%s' "$source_script" | cksum | awk '{print $1}')
+    staged_script="$staged_dir/$(basename "$source_script").$staged_id"
 
     mkdir -p "$staged_dir"
-    cp -f "$source_script" "$staged_script"
-    rewrite_script_file "$staged_script"
-    chmod +x "$staged_script" 2>/dev/null || true
+    if [ -f "$staged_script" ] &&
+        [ ! "$source_script" -nt "$staged_script" ] &&
+        [ ! "$PAK_DIR/Portmaster.sh" -nt "$staged_script" ] &&
+        [ ! "$PAK_DIR/files/control.txt" -nt "$staged_script" ]; then
+        echo "PMI_DIAG staged_launch_reused=$staged_script" >&2
+    else
+        cp -f "$source_script" "$staged_script"
+        rewrite_script_file "$staged_script"
+        chmod +x "$staged_script" 2>/dev/null || true
+        echo "PMI_DIAG staged_launch_refreshed=$staged_script" >&2
+    fi
     printf '%s\n' "$staged_script"
 }
 
@@ -460,6 +576,168 @@ port_has_arch() {
     printf '%s' "$compact" | grep -Eq "\"arch\"[[:space:]]*:[[:space:]]*\\[[^]]*\"$wanted_arch\""
 }
 
+refresh_launcher_index() {
+    local index_path
+    local tmp_index
+    local port_json
+    local shell_name
+    local launcher_path
+    local port_dir
+    local has_armhf
+    local has_aarch64
+    local needs_flip_libmali
+
+    mkdir -p "$REAL_PORTS_DIR"
+    index_path=$(launcher_index_path)
+    tmp_index="${index_path}.tmp.$$"
+    : >"$tmp_index"
+
+    for port_json in "$REAL_PORTS_DIR"/*/port.json; do
+        [ -f "$port_json" ] || continue
+        shell_name=$(port_shell_from_json "$port_json")
+        [ -n "$shell_name" ] || continue
+        launcher_path="$REAL_PORTS_DIR/$shell_name"
+        [ -f "$launcher_path" ] || continue
+        port_dir=$(dirname "$port_json")
+        has_armhf=0
+        has_aarch64=0
+        needs_flip_libmali=0
+        port_has_arch "$port_json" "armhf" && has_armhf=1
+        port_has_arch "$port_json" "aarch64" && has_aarch64=1
+        grep -q 'sbc_4_3_rcv12' "$launcher_path" 2>/dev/null && needs_flip_libmali=1
+        printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$launcher_path" "$port_dir" "$has_armhf" "$has_aarch64" "$needs_flip_libmali" >>"$tmp_index"
+    done
+
+    for launcher_path in "$REAL_PORTS_DIR"/*.sh; do
+        [ -f "$launcher_path" ] || continue
+        if grep -Fq "$(printf '%s\t' "$launcher_path")" "$tmp_index" 2>/dev/null; then
+            continue
+        fi
+        needs_flip_libmali=0
+        grep -q 'sbc_4_3_rcv12' "$launcher_path" 2>/dev/null && needs_flip_libmali=1
+        printf '%s\t\t0\t0\t%s\n' "$launcher_path" "$needs_flip_libmali" >>"$tmp_index"
+    done
+
+    mv -f "$tmp_index" "$index_path"
+    PMI_LAUNCH_INDEX_READY=1
+    PMI_LAUNCHER_METADATA_SOURCE=""
+    echo "PMI_DIAG launcher_index_refresh=$index_path"
+}
+
+launcher_index_is_stale() {
+    local index_path="$1"
+    local launcher_path
+
+    [ -f "$index_path" ] || return 0
+    if [ "$PAK_DIR/Portmaster.sh" -nt "$index_path" ]; then
+        return 0
+    fi
+    for launcher_path in "$REAL_PORTS_DIR"/*.sh; do
+        [ -f "$launcher_path" ] || continue
+        if [ "$launcher_path" -nt "$index_path" ]; then
+            return 0
+        fi
+    done
+    if find "$REAL_PORTS_DIR" -mindepth 2 -maxdepth 2 -type f -name 'port.json' -newer "$index_path" | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_launcher_index() {
+    local index_path
+
+    index_path=$(launcher_index_path)
+    if [ "$PMI_LAUNCH_INDEX_READY" = "1" ] && [ -f "$index_path" ]; then
+        return 0
+    fi
+    if launcher_index_is_stale "$index_path"; then
+        refresh_launcher_index
+    else
+        PMI_LAUNCH_INDEX_READY=1
+        echo "PMI_DIAG launcher_index_cached=$index_path"
+    fi
+}
+
+lookup_launcher_metadata() {
+    local launcher_path="$1"
+    local index_path
+    local entry_path
+    local entry_port_dir
+    local entry_armhf
+    local entry_aarch64
+    local entry_needs_flip_libmali
+    local refreshed_once=0
+
+    [ -f "$launcher_path" ] || return 1
+    if [ "$PMI_LAUNCHER_METADATA_SOURCE" = "$launcher_path" ]; then
+        return 0
+    fi
+
+    ensure_launcher_index || return 1
+    index_path=$(launcher_index_path)
+    while :; do
+        while IFS="$(printf '\t')" read -r entry_path entry_port_dir entry_armhf entry_aarch64 entry_needs_flip_libmali || [ -n "${entry_path:-}" ]; do
+            [ -n "${entry_path:-}" ] || continue
+            if [ "$entry_path" != "$launcher_path" ]; then
+                continue
+            fi
+            PMI_LAUNCHER_METADATA_SOURCE="$entry_path"
+            PMI_LAUNCHER_METADATA_PORT_DIR="$entry_port_dir"
+            PMI_LAUNCHER_METADATA_ARMHF="${entry_armhf:-0}"
+            PMI_LAUNCHER_METADATA_AARCH64="${entry_aarch64:-0}"
+            PMI_LAUNCHER_METADATA_NEEDS_FLIP_LIBMALI="${entry_needs_flip_libmali:-0}"
+            return 0
+        done < "$index_path"
+        if [ "$refreshed_once" = "1" ]; then
+            break
+        fi
+        refreshed_once=1
+        refresh_launcher_index || return 1
+    done
+
+    PMI_LAUNCHER_METADATA_SOURCE="$launcher_path"
+    PMI_LAUNCHER_METADATA_PORT_DIR=""
+    PMI_LAUNCHER_METADATA_ARMHF=0
+    PMI_LAUNCHER_METADATA_AARCH64=0
+    PMI_LAUNCHER_METADATA_NEEDS_FLIP_LIBMALI=0
+    return 0
+}
+
+global_port_repairs_are_stale() {
+    local stamp_path="$1"
+
+    [ -f "$stamp_path" ] || return 0
+    if launcher_index_is_stale "$(launcher_index_path)"; then
+        return 0
+    fi
+    if [ "$PAK_DIR/Portmaster.sh" -nt "$stamp_path" ]; then
+        return 0
+    fi
+    if find "$REAL_PORTS_DIR" -type f \( -path '*/box86/box86' -o -path '*/box64/box64' \) -newer "$stamp_path" | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_global_port_repairs() {
+    local stamp_path
+
+    stamp_path=$(global_port_repairs_stamp_path)
+    if global_port_repairs_are_stale "$stamp_path"; then
+        heal_installed_port_launchers
+        apply_port_arch_rewrites
+        refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
+        refresh_launcher_index
+        touch_stamp_file "$stamp_path"
+        echo "PMI_DIAG global_port_repairs_refresh=$stamp_path"
+    else
+        ensure_launcher_index || return 1
+        echo "PMI_DIAG global_port_repairs_cached=$stamp_path"
+    fi
+}
+
 launcher_requires_armhf() {
     local launcher_path="$1"
     launcher_armhf_port_dir "$launcher_path" >/dev/null 2>&1
@@ -467,19 +745,11 @@ launcher_requires_armhf() {
 
 launcher_armhf_port_dir() {
     local launcher_path="$1"
-    local port_json shell_name
 
-    for port_json in "$REAL_PORTS_DIR"/*/port.json; do
-        [ -f "$port_json" ] || continue
-        shell_name=$(port_shell_from_json "$port_json")
-        [ -n "$shell_name" ] || continue
-        if [ "$REAL_PORTS_DIR/$shell_name" = "$launcher_path" ] && port_has_arch "$port_json" "armhf"; then
-            dirname "$port_json"
-            return 0
-        fi
-    done
-
-    return 1
+    lookup_launcher_metadata "$launcher_path" || return 1
+    [ "$PMI_LAUNCHER_METADATA_ARMHF" = "1" ] || return 1
+    [ -n "$PMI_LAUNCHER_METADATA_PORT_DIR" ] || return 1
+    printf '%s\n' "$PMI_LAUNCHER_METADATA_PORT_DIR"
 }
 
 rewrite_armhf_port_launcher() {
@@ -545,7 +815,8 @@ bind_flip_libmali() {
 launcher_requires_flip_libmali() {
     local launcher_path="$1"
 
-    grep -q 'sbc_4_3_rcv12' "$launcher_path" 2>/dev/null
+    lookup_launcher_metadata "$launcher_path" || return 1
+    [ "$PMI_LAUNCHER_METADATA_NEEDS_FLIP_LIBMALI" = "1" ]
 }
 
 port_probe_helper_path() {
@@ -696,26 +967,12 @@ refresh_armhf_probe_cache() {
 
 launcher_aarch64_port_dir() {
     local launcher_path="$1"
-    local port_json
-    local shell_name
 
     [ -f "$launcher_path" ] || return 1
-
-    for port_json in "$REAL_PORTS_DIR"/*/port.json; do
-        [ -f "$port_json" ] || continue
-        shell_name=$(port_shell_from_json "$port_json")
-        [ -n "$shell_name" ] || continue
-        if [ "$REAL_PORTS_DIR/$shell_name" != "$launcher_path" ]; then
-            continue
-        fi
-        if ! port_has_arch "$port_json" "aarch64"; then
-            return 1
-        fi
-        dirname "$port_json"
-        return 0
-    done
-
-    return 1
+    lookup_launcher_metadata "$launcher_path" || return 1
+    [ "$PMI_LAUNCHER_METADATA_AARCH64" = "1" ] || return 1
+    [ -n "$PMI_LAUNCHER_METADATA_PORT_DIR" ] || return 1
+    printf '%s\n' "$PMI_LAUNCHER_METADATA_PORT_DIR"
 }
 
 write_box64_wrapper() {
@@ -906,6 +1163,7 @@ process_armhf_binary_wrappers_for_port() {
                 [ -f "$record_path" ] || continue
                 write_armhf_exec_compat_wrapper "$record_path"
             done < "$cache_path"
+            touch "$cache_path" 2>/dev/null || true
             return 0
         fi
     fi
@@ -928,6 +1186,9 @@ process_armhf_binary_wrappers_for_port() {
         [ "${20}" = "00" ] || continue
         write_armhf_exec_compat_wrapper "$file"
     done
+    if [ -f "$cache_path" ]; then
+        touch "$cache_path" 2>/dev/null || true
+    fi
 }
 
 refresh_armhf_binary_wrappers() {
@@ -1214,7 +1475,7 @@ maybe_refresh_aarch64_sdl_compat_binary_from_probe() {
     fi
 }
 
-process_aarch64_sdl_compat_for_port() {
+load_aarch64_port_probe_state() {
     local port_dir="$1"
     local cache_path
     local record_type
@@ -1223,15 +1484,62 @@ process_aarch64_sdl_compat_for_port() {
     local field2
     local field3
     local field4
+    local uses_sdl_gl_windowing
+    local is_wrapper
 
-    refresh_port_probe_cache "$port_dir" || return 0
+    if [ "$PMI_AARCH64_PROBE_PORT_DIR" = "$port_dir" ] && [ -f "$PMI_AARCH64_PROBE_CACHE_PATH" ]; then
+        return 0
+    fi
+
+    refresh_port_probe_cache "$port_dir" || return 1
     cache_path=$(port_probe_cache_path "$port_dir")
+    [ -f "$cache_path" ] || return 1
+
+    PMI_AARCH64_PROBE_PORT_DIR="$port_dir"
+    PMI_AARCH64_PROBE_CACHE_PATH="$cache_path"
+    PMI_AARCH64_PROBE_HAS_BUNDLED_NATIVE_GL=0
+    PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL=0
+
+    while IFS=$'\t' read -r record_type record_path field1 field2 field3 field4 || [ -n "${record_type:-}" ]; do
+        [ -n "${record_type:-}" ] || continue
+        case "$record_type" in
+            PORT)
+                if [ "$field1" = "has_bundled_native_gl_stack=1" ]; then
+                    PMI_AARCH64_PROBE_HAS_BUNDLED_NATIVE_GL=1
+                fi
+                ;;
+            BIN)
+                uses_sdl_gl_windowing="${field3#uses_sdl_gl_windowing=}"
+                is_wrapper="${field4#is_wrapper=}"
+                if [ "$uses_sdl_gl_windowing" = "1" ] && [ "$is_wrapper" != "1" ]; then
+                    PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL=1
+                fi
+                ;;
+        esac
+    done < "$cache_path"
+
+    if [ "$PMI_AARCH64_PROBE_HAS_BUNDLED_NATIVE_GL" = "1" ]; then
+        PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL=0
+    fi
+}
+
+process_aarch64_sdl_compat_for_port() {
+    local port_dir="$1"
+    local record_type
+    local record_path
+    local field1
+    local field2
+    local field3
+    local field4
+
+    load_aarch64_port_probe_state "$port_dir" || return 0
 
     while IFS=$'\t' read -r record_type record_path field1 field2 field3 field4 || [ -n "${record_type:-}" ]; do
         [ -n "${record_type:-}" ] || continue
         [ "$record_type" = "BIN" ] || continue
         maybe_refresh_aarch64_sdl_compat_binary_from_probe "$record_path" "$field1" "$field2"
-    done < "$cache_path"
+    done < "$PMI_AARCH64_PROBE_CACHE_PATH"
+    touch "$PMI_AARCH64_PROBE_CACHE_PATH" 2>/dev/null || true
 }
 
 refresh_aarch64_sdl_compat_wrappers() {
@@ -1266,43 +1574,13 @@ refresh_aarch64_sdl_compat_for_launcher() {
 launcher_requires_system_gl_stack() {
     local launcher_path="$1"
     local port_dir
-    local cache_path
-    local record_type
-    local record_path
-    local field1
-    local field2
-    local field3
-    local field4
-    local uses_sdl_gl_windowing
-    local is_wrapper
 
     if ! port_dir=$(launcher_aarch64_port_dir "$launcher_path"); then
         return 1
     fi
 
-    refresh_port_probe_cache "$port_dir" || return 1
-    cache_path=$(port_probe_cache_path "$port_dir")
-
-    while IFS=$'\t' read -r record_type record_path field1 field2 field3 field4 || [ -n "${record_type:-}" ]; do
-        [ -n "${record_type:-}" ] || continue
-
-        case "$record_type" in
-            PORT)
-                if [ "$field1" = "has_bundled_native_gl_stack=1" ]; then
-                    return 1
-                fi
-                ;;
-            BIN)
-                uses_sdl_gl_windowing="${field3#uses_sdl_gl_windowing=}"
-                is_wrapper="${field4#is_wrapper=}"
-                if [ "$uses_sdl_gl_windowing" = "1" ] && [ "$is_wrapper" != "1" ]; then
-                    return 0
-                fi
-                ;;
-        esac
-    done < "$cache_path"
-
-    return 1
+    load_aarch64_port_probe_state "$port_dir" || return 1
+    [ "$PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL" = "1" ]
 }
 
 seed_x86_runtime_libs() {
@@ -1437,10 +1715,8 @@ clear_ports_cache() {
 }
 
 post_gui_rewrites() {
-    heal_installed_port_launchers
-    apply_port_arch_rewrites
-    refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
     process_squashfs_files "$REAL_PORTS_DIR"
+    ensure_global_port_repairs
     copy_game_scripts
     copy_artwork_to_media
     clear_ports_cache
@@ -1470,9 +1746,7 @@ launch_port_script() {
     local script_to_run
     local armhf_port_dir
 
-    heal_installed_port_launchers
-    apply_port_arch_rewrites
-    refresh_box_runtime_wrappers "$REAL_PORTS_DIR"
+    ensure_global_port_repairs
     refresh_armhf_binary_wrappers_for_launcher "$source_script"
     refresh_aarch64_sdl_compat_for_launcher "$source_script"
     script_to_run=$(stage_launch_script "$source_script")
