@@ -22,7 +22,8 @@
 #define SHT_DYNSYM 11
 #define SHN_UNDEF 0
 
-#define WRAPPER_MARKER "# PMI_AARCH64_SDL_COMPAT_WRAPPER=1"
+#define SDL_WRAPPER_MARKER "# PMI_AARCH64_SDL_COMPAT_WRAPPER=1"
+#define NATIVE_WRAPPER_MARKER "# PMI_AARCH64_NATIVE_COMPAT_WRAPPER=1"
 
 typedef struct {
     unsigned char e_ident[EI_NIDENT];
@@ -66,6 +67,7 @@ typedef struct {
 typedef struct {
     char *path;
     int needs_default_audio_info;
+    int needs_pulse_simple;
     int uses_sdl_gl_windowing;
     int is_wrapper;
 } probe_result;
@@ -80,6 +82,8 @@ typedef struct {
 static const char *DEFAULT_AUDIO_INFO_SYMBOLS[] = {
     "SDL_GetDefaultAudioInfo"
 };
+
+static const char *PULSE_SIMPLE_DEPENDENCY = "libpulse-simple.so.0";
 
 static const char *SDL_GL_WINDOWING_SYMBOLS[] = {
     "SDL_GL_CreateContext",
@@ -160,9 +164,10 @@ static int run_scan_aarch64_launch_port(const char *port_dir) {
            port_dir,
            results.has_bundled_native_gl_stack ? 1 : 0);
     for (index = 0; index < results.count; index++) {
-        printf("BIN\t%s\tneeds_default_audio_info=%d\tuses_sdl_gl_windowing=%d\tis_wrapper=%d\n",
+        printf("BIN\t%s\tneeds_default_audio_info=%d\tneeds_pulse_simple=%d\tuses_sdl_gl_windowing=%d\tis_wrapper=%d\n",
                results.items[index].path,
                results.items[index].needs_default_audio_info ? 1 : 0,
+               results.items[index].needs_pulse_simple ? 1 : 0,
                results.items[index].uses_sdl_gl_windowing ? 1 : 0,
                results.items[index].is_wrapper ? 1 : 0);
     }
@@ -290,7 +295,7 @@ static int file_has_wrapper_marker(const char *path) {
         size_t line_len = strlen(line);
         if (line_len > 0 && line[line_len - 1] == '\n')
             line[line_len - 1] = '\0';
-        if (strcmp(line, WRAPPER_MARKER) == 0) {
+        if (strcmp(line, SDL_WRAPPER_MARKER) == 0 || strcmp(line, NATIVE_WRAPPER_MARKER) == 0) {
             fclose(file);
             return 1;
         }
@@ -349,6 +354,7 @@ static int classify_candidate(const char *path, probe_result *out_result) {
         data, size,
         DEFAULT_AUDIO_INFO_SYMBOLS,
         sizeof(DEFAULT_AUDIO_INFO_SYMBOLS) / sizeof(DEFAULT_AUDIO_INFO_SYMBOLS[0]));
+    result.needs_pulse_simple = file_contains_bytes(data, size, PULSE_SIMPLE_DEPENDENCY);
     result.uses_sdl_gl_windowing = binary_matches_symbols(
         data, size,
         SDL_GL_WINDOWING_SYMBOLS,

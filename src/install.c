@@ -543,6 +543,39 @@ static int install_runtime_support_tools(const install_layout *layout) {
         return -1;
     if (copy_file(src, dst) != 0)
         return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulse-simple.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulse-simple.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulse.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulse.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulsecommon-13.99.so", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulsecommon-13.99.so", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
     return chmod(dst, 0755);
 }
 

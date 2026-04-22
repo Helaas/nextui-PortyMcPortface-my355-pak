@@ -535,7 +535,7 @@ port_probe_helper_path() {
 port_probe_cache_path() {
     local port_dir="$1"
 
-    printf '%s/.pmi-port-probe-v1.tsv\n' "$port_dir"
+    printf '%s/.pmi-port-probe-v2.tsv\n' "$port_dir"
 }
 
 cleanup_legacy_port_probe_artifacts() {
@@ -853,11 +853,50 @@ default_sdl2_has_default_audio_info_symbol() {
     [ "$PMI_SDL2_DEFAULT_AUDIO_INFO_PRESENT" = "1" ]
 }
 
+default_pulse_simple_candidate_path() {
+    if [ -n "${PMI_PULSE_SIMPLE_SYSTEM_LIB:-}" ] && [ -f "$PMI_PULSE_SIMPLE_SYSTEM_LIB" ]; then
+        printf '%s\n' "$PMI_PULSE_SIMPLE_SYSTEM_LIB"
+        return 0
+    fi
+
+    if [ -f /usr/lib/libpulse-simple.so.0 ]; then
+        printf '%s\n' /usr/lib/libpulse-simple.so.0
+        return 0
+    fi
+
+    if [ -f /lib/libpulse-simple.so.0 ]; then
+        printf '%s\n' /lib/libpulse-simple.so.0
+        return 0
+    fi
+
+    return 1
+}
+
+default_pulse_simple_available() {
+    local system_pulse
+
+    if [ "${PMI_PULSE_SIMPLE_SCANNED:-0}" = "1" ]; then
+        [ "${PMI_PULSE_SIMPLE_PRESENT:-0}" = "1" ]
+        return $?
+    fi
+
+    PMI_PULSE_SIMPLE_SCANNED=1
+    PMI_PULSE_SIMPLE_PRESENT=0
+
+    if ! system_pulse=$(default_pulse_simple_candidate_path); then
+        return 1
+    fi
+
+    PMI_PULSE_SIMPLE_SYSTEM_LIB_CACHED="$system_pulse"
+    PMI_PULSE_SIMPLE_PRESENT=1
+    return 0
+}
+
 is_aarch64_sdl_compat_wrapper() {
     local file="$1"
 
     [ -f "$file" ] || return 1
-    head -n 2 "$file" 2>/dev/null | grep -qx '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1'
+    head -n 2 "$file" 2>/dev/null | grep -Eq '^# PMI_AARCH64_(SDL_COMPAT|NATIVE_COMPAT)_WRAPPER=1$'
 }
 
 restore_aarch64_sdl_compat_wrapper() {
@@ -871,8 +910,21 @@ restore_aarch64_sdl_compat_wrapper() {
     mv "$original_path" "$wrapper_path"
 }
 
+wrapper_matches_aarch64_compat_mode() {
+    local wrapper_path="$1"
+    local use_sdl="$2"
+    local use_pulse="$3"
+
+    [ -f "$wrapper_path" ] || return 1
+    grep -q "^PMI_USE_AARCH64_SDL_COMPAT=\"$use_sdl\"$" "$wrapper_path" 2>/dev/null || return 1
+    grep -q "^PMI_USE_AARCH64_PULSE_COMPAT=\"$use_pulse\"$" "$wrapper_path" 2>/dev/null || return 1
+    return 0
+}
+
 write_aarch64_sdl_compat_wrapper() {
     local wrapper_path="$1"
+    local use_sdl="$2"
+    local use_pulse="$3"
     local wrapper_dir wrapper_name original_path
 
     wrapper_dir=$(dirname "$wrapper_path")
@@ -883,25 +935,92 @@ write_aarch64_sdl_compat_wrapper() {
         mv "$wrapper_path" "$original_path"
     fi
 
-    cat >"$wrapper_path" <<'EOF'
+    cat >"$wrapper_path" <<EOF
 #!/bin/sh
-# PMI_AARCH64_SDL_COMPAT_WRAPPER=1
+# PMI_AARCH64_NATIVE_COMPAT_WRAPPER=1
 set -eu
 
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-SELF_NAME=$(basename -- "$0")
-PAK_DIR="${PAK_DIR:-}"
-AARCH64_SDL_RUNTIME_LIB="$PAK_DIR/runtime/aarch64/lib"
-REAL_BINARY="$SELF_DIR/${SELF_NAME}.original"
+SELF_DIR=\$(CDPATH= cd -- "\$(dirname -- "\$0")" && pwd)
+SELF_NAME=\$(basename -- "\$0")
+PAK_DIR="\${PAK_DIR:-}"
+AARCH64_SDL_RUNTIME_LIB="\$PAK_DIR/runtime/aarch64/lib"
+AARCH64_PULSE_RUNTIME_LIB="\$PAK_DIR/runtime/aarch64/pulse"
+PMI_USE_AARCH64_SDL_COMPAT="$use_sdl"
+PMI_USE_AARCH64_PULSE_COMPAT="$use_pulse"
+REAL_BINARY="\$SELF_DIR/\${SELF_NAME}.original"
+COMPAT_LD_LIBRARY_PATH=""
 
-export LD_LIBRARY_PATH="$AARCH64_SDL_RUNTIME_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+append_compat_path() {
+    if [ -z "\$1" ]; then
+        return 0
+    fi
 
-if [ -z "$PAK_DIR" ] || [ ! -x "$REAL_BINARY" ] || [ ! -f "$AARCH64_SDL_RUNTIME_LIB/libSDL2-2.0.so.0" ]; then
+    if [ -n "\$COMPAT_LD_LIBRARY_PATH" ]; then
+        COMPAT_LD_LIBRARY_PATH="\$COMPAT_LD_LIBRARY_PATH:\$1"
+    else
+        COMPAT_LD_LIBRARY_PATH="\$1"
+    fi
+}
+
+capture_audio_state() {
+    PMI_ORIG_PLAYBACK_PATH=\$(amixer sget "Playback Path" 2>/dev/null | sed -n "s/.*Item0: '\\([^']*\\)'.*/\\1/p" | head -n 1)
+    PMI_ORIG_SPK=\$(amixer sget SPK 2>/dev/null | sed -n 's/.*Mono: \\([0-9][0-9]*\\) \\[[0-9][0-9]*%\\].*/\\1/p' | head -n 1)
+}
+
+restore_audio_state() {
+    PMI_RESTORE_TARGET_PATH="\${PMI_ORIG_PLAYBACK_PATH:-SPK}"
+
+    amixer sset "Playback Path" OFF >/dev/null 2>&1 || true
+    amixer sset "Playback Path" "\$PMI_RESTORE_TARGET_PATH" >/dev/null 2>&1 || true
+    amixer sset Speaker on >/dev/null 2>&1 || true
+    amixer sset Headphone on >/dev/null 2>&1 || true
+    if [ -n "\${PMI_ORIG_SPK:-}" ]; then
+        amixer sset SPK "\$PMI_ORIG_SPK" >/dev/null 2>&1 || true
+    fi
+}
+
+if [ "\$PMI_USE_AARCH64_SDL_COMPAT" = "1" ]; then
+    append_compat_path "\$AARCH64_SDL_RUNTIME_LIB"
+fi
+
+if [ "\$PMI_USE_AARCH64_PULSE_COMPAT" = "1" ]; then
+    append_compat_path "\$AARCH64_PULSE_RUNTIME_LIB"
+fi
+
+if [ -z "\$PAK_DIR" ] || [ ! -x "\$REAL_BINARY" ]; then
+    echo "FATAL: missing aarch64 native compatibility runtime" >&2
+    exit 1
+fi
+
+if [ "\$PMI_USE_AARCH64_SDL_COMPAT" = "1" ] && [ ! -f "\$AARCH64_SDL_RUNTIME_LIB/libSDL2-2.0.so.0" ]; then
     echo "FATAL: missing aarch64 SDL compatibility runtime" >&2
     exit 1
 fi
 
-exec "$REAL_BINARY" "$@"
+if [ "\$PMI_USE_AARCH64_PULSE_COMPAT" = "1" ] && \
+    { [ ! -f "\$AARCH64_PULSE_RUNTIME_LIB/libpulse-simple.so.0" ] || [ ! -f "\$AARCH64_PULSE_RUNTIME_LIB/libpulse.so.0" ] || [ ! -f "\$AARCH64_PULSE_RUNTIME_LIB/libpulsecommon-13.99.so" ]; }; then
+    echo "FATAL: missing aarch64 Pulse compatibility runtime" >&2
+    exit 1
+fi
+
+if [ -n "\$COMPAT_LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="\$COMPAT_LD_LIBRARY_PATH\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+fi
+
+if [ "\$PMI_USE_AARCH64_PULSE_COMPAT" = "1" ]; then
+    capture_audio_state
+fi
+
+set +e
+"\$REAL_BINARY" "\$@"
+PMI_NATIVE_COMPAT_STATUS=\$?
+set -e
+
+if [ "\$PMI_USE_AARCH64_PULSE_COMPAT" = "1" ]; then
+    restore_audio_state
+fi
+
+exit "\$PMI_NATIVE_COMPAT_STATUS"
 EOF
     chmod +x "$wrapper_path" 2>/dev/null || true
 }
@@ -909,29 +1028,43 @@ EOF
 maybe_refresh_aarch64_sdl_compat_binary_from_probe() {
     local binary_path="$1"
     local needs_default_audio_info_field="$2"
+    local needs_pulse_simple_field="$3"
     local needs_default_audio_info="${needs_default_audio_info_field#needs_default_audio_info=}"
+    local needs_pulse_simple="${needs_pulse_simple_field#needs_pulse_simple=}"
     local runtime_sdl="$PAK_DIR/runtime/aarch64/lib/libSDL2-2.0.so.0"
+    local runtime_pulse_dir="$PAK_DIR/runtime/aarch64/pulse"
+    local use_sdl=0
+    local use_pulse=0
 
     [ -f "$binary_path" ] || return 0
 
-    if default_sdl2_has_default_audio_info_symbol; then
+    if [ "$needs_default_audio_info" = "1" ] && ! default_sdl2_has_default_audio_info_symbol; then
+        use_sdl=1
+    fi
+
+    if [ "$needs_pulse_simple" = "1" ] && ! default_pulse_simple_available; then
+        use_pulse=1
+    fi
+
+    if [ "$use_sdl" = "0" ] && [ "$use_pulse" = "0" ]; then
         restore_aarch64_sdl_compat_wrapper "$binary_path"
         return 0
     fi
 
-    if [ "$needs_default_audio_info" != "1" ]; then
-        restore_aarch64_sdl_compat_wrapper "$binary_path"
-        return 0
-    fi
-
-    if [ ! -f "$runtime_sdl" ]; then
+    if [ "$use_sdl" = "1" ] && [ ! -f "$runtime_sdl" ]; then
         echo "PMI_WARN aarch64_sdl_compat_missing=$runtime_sdl"
         return 0
     fi
 
-    if ! is_aarch64_sdl_compat_wrapper "$binary_path"; then
-        write_aarch64_sdl_compat_wrapper "$binary_path"
-        echo "PMI_DIAG aarch64_sdl_compat_applied=$binary_path"
+    if [ "$use_pulse" = "1" ] && \
+        { [ ! -f "$runtime_pulse_dir/libpulse-simple.so.0" ] || [ ! -f "$runtime_pulse_dir/libpulse.so.0" ] || [ ! -f "$runtime_pulse_dir/libpulsecommon-13.99.so" ]; }; then
+        echo "PMI_WARN aarch64_pulse_compat_missing=$runtime_pulse_dir"
+        return 0
+    fi
+
+    if ! wrapper_matches_aarch64_compat_mode "$binary_path" "$use_sdl" "$use_pulse"; then
+        write_aarch64_sdl_compat_wrapper "$binary_path" "$use_sdl" "$use_pulse"
+        echo "PMI_DIAG aarch64_native_compat_applied=$binary_path sdl=$use_sdl pulse=$use_pulse"
     fi
 }
 
@@ -943,14 +1076,15 @@ process_aarch64_sdl_compat_for_port() {
     local field1
     local field2
     local field3
+    local field4
 
     refresh_port_probe_cache "$port_dir" || return 0
     cache_path=$(port_probe_cache_path "$port_dir")
 
-    while IFS=$'\t' read -r record_type record_path field1 field2 field3 || [ -n "${record_type:-}" ]; do
+    while IFS=$'\t' read -r record_type record_path field1 field2 field3 field4 || [ -n "${record_type:-}" ]; do
         [ -n "${record_type:-}" ] || continue
         [ "$record_type" = "BIN" ] || continue
-        maybe_refresh_aarch64_sdl_compat_binary_from_probe "$record_path" "$field1"
+        maybe_refresh_aarch64_sdl_compat_binary_from_probe "$record_path" "$field1" "$field2"
     done < "$cache_path"
 }
 
@@ -992,6 +1126,7 @@ launcher_requires_system_gl_stack() {
     local field1
     local field2
     local field3
+    local field4
     local uses_sdl_gl_windowing
     local is_wrapper
 
@@ -1002,7 +1137,7 @@ launcher_requires_system_gl_stack() {
     refresh_port_probe_cache "$port_dir" || return 1
     cache_path=$(port_probe_cache_path "$port_dir")
 
-    while IFS=$'\t' read -r record_type record_path field1 field2 field3 || [ -n "${record_type:-}" ]; do
+    while IFS=$'\t' read -r record_type record_path field1 field2 field3 field4 || [ -n "${record_type:-}" ]; do
         [ -n "${record_type:-}" ] || continue
 
         case "$record_type" in
@@ -1012,8 +1147,8 @@ launcher_requires_system_gl_stack() {
                 fi
                 ;;
             BIN)
-                uses_sdl_gl_windowing="${field2#uses_sdl_gl_windowing=}"
-                is_wrapper="${field3#is_wrapper=}"
+                uses_sdl_gl_windowing="${field3#uses_sdl_gl_windowing=}"
+                is_wrapper="${field4#is_wrapper=}"
                 if [ "$uses_sdl_gl_windowing" = "1" ] && [ "$is_wrapper" != "1" ]; then
                     return 0
                 fi

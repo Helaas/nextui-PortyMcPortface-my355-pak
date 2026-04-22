@@ -35,6 +35,23 @@ exec /usr/bin/strings "$@"
 EOF
 	chmod +x "$shim_bin/strings"
 
+	cat >"$shim_bin/amixer" <<'EOF'
+#!/bin/sh
+if [ -n "${PMI_TEST_AMIXER_LOG:-}" ]; then
+	printf '%s\n' "$*" >>"$PMI_TEST_AMIXER_LOG"
+fi
+case "${1:-}:${2:-}" in
+	"sget:Playback Path")
+		printf "Simple mixer control 'Playback Path',0\n  Item0: 'SPK'\n"
+		;;
+	"sget:SPK")
+		printf 'Mono: 2 [100%%]\n'
+		;;
+esac
+exit 0
+EOF
+	chmod +x "$shim_bin/amixer"
+
 	cat >"$pak_dir/bin/pm-sdl-compat-check" <<'EOF'
 #!/bin/sh
 set -eu
@@ -99,7 +116,7 @@ find "$port_dir" -maxdepth 2 -type f | LC_ALL=C sort | while IFS= read -r file |
 
 	is_wrapper=0
 	inspect="$file"
-	if /bin/head -n 2 "$file" 2>/dev/null | /usr/bin/grep -qx '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1'; then
+	if /bin/head -n 2 "$file" 2>/dev/null | /usr/bin/grep -Eq '^# PMI_AARCH64_(SDL_COMPAT|NATIVE_COMPAT)_WRAPPER=1$'; then
 		inspect="${file}.original"
 		[ -f "$inspect" ] || continue
 		is_wrapper=1
@@ -109,16 +126,20 @@ find "$port_dir" -maxdepth 2 -type f | LC_ALL=C sort | while IFS= read -r file |
 	[ "$header" = "7f454c4602" ] || continue
 
 	needs_default_audio_info=0
+	needs_pulse_simple=0
 	uses_sdl_gl_windowing=0
 	if /usr/bin/grep -aq 'SDL_GetDefaultAudioInfo' "$inspect"; then
 		needs_default_audio_info=1
+	fi
+	if /usr/bin/grep -aq 'libpulse-simple.so.0' "$inspect"; then
+		needs_pulse_simple=1
 	fi
 	if /usr/bin/grep -aq 'SDL_GL_CreateContext' "$inspect" && /usr/bin/grep -aq 'SDL_CreateWindow' "$inspect"; then
 		uses_sdl_gl_windowing=1
 	fi
 
-	printf 'BIN\t%s\tneeds_default_audio_info=%s\tuses_sdl_gl_windowing=%s\tis_wrapper=%s\n' \
-		"$file" "$needs_default_audio_info" "$uses_sdl_gl_windowing" "$is_wrapper"
+	printf 'BIN\t%s\tneeds_default_audio_info=%s\tneeds_pulse_simple=%s\tuses_sdl_gl_windowing=%s\tis_wrapper=%s\n' \
+		"$file" "$needs_default_audio_info" "$needs_pulse_simple" "$uses_sdl_gl_windowing" "$is_wrapper"
 done
 EOF
 	chmod +x "$pak_dir/bin/pm-port-probe"
@@ -266,12 +287,16 @@ run_direct_launch_for_script() {
 	log_file="$root/PORTS.txt"
 	rom_dir="$root/Roms/Ports (PORTS)"
 
+	env \
 	PAK_DIR="$pak_dir" \
 	EMU_DIR="$emu_dir" \
 	ROM_PATH="$rom_dir/$launcher_name" \
 	PMI_PORT_SCRIPT="$rom_dir/.ports/$launcher_name" \
 	PMI_SDL2_SYSTEM_LIB="${PMI_SDL2_SYSTEM_LIB:-}" \
+	PMI_PULSE_SIMPLE_SYSTEM_LIB="${PMI_PULSE_SIMPLE_SYSTEM_LIB:-}" \
 	PMI_TEST_PORT_PROBE_LOG="${PMI_TEST_PORT_PROBE_LOG:-}" \
+	PMI_TEST_RUN_AARCH64_BINARY="${PMI_TEST_RUN_AARCH64_BINARY:-}" \
+	PMI_TEST_AMIXER_LOG="${PMI_TEST_AMIXER_LOG:-}" \
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
@@ -289,12 +314,18 @@ add_aarch64_sdl_fixture() {
 	port_dir="$real_ports_dir/testaarch64"
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	system_sdl_dir="$root/system-sdl"
+	system_pulse_dir="$root/system-pulse"
 
-	mkdir -p "$port_dir" "$pak_dir/runtime/aarch64/lib" "$system_sdl_dir"
+	mkdir -p "$port_dir" "$pak_dir/runtime/aarch64/lib" "$pak_dir/runtime/aarch64/pulse" "$system_sdl_dir" "$system_pulse_dir"
 
 	cat >"$real_ports_dir/TestAarch64.sh" <<'EOF'
-#!/bin/sh
-exit 0
+#!/usr/bin/env bash
+set -eu
+source "$EMU_DIR/control.txt"
+GAMEDIR="/$directory/ports/testaarch64"
+if [ -n "${PMI_TEST_RUN_AARCH64_BINARY:-}" ]; then
+	"$GAMEDIR/$PMI_TEST_RUN_AARCH64_BINARY"
+fi
 EOF
 	chmod +x "$real_ports_dir/TestAarch64.sh"
 
@@ -312,6 +343,10 @@ EOF
 
 	printf '\177ELF\002stub\nSDL_GetDefaultAudioInfo\n' >"$port_dir/needs-sdl"
 	chmod +x "$port_dir/needs-sdl"
+	printf '\177ELF\002stub\nlibpulse-simple.so.0\n' >"$port_dir/needs-pulse"
+	chmod +x "$port_dir/needs-pulse"
+	printf '\177ELF\002stub\nSDL_GetDefaultAudioInfo\nlibpulse-simple.so.0\n' >"$port_dir/needs-both"
+	chmod +x "$port_dir/needs-both"
 
 	cat >"$port_dir/not-elf" <<'EOF'
 #!/bin/sh
@@ -323,8 +358,12 @@ EOF
 
 	printf '\177ELF\002stub\nSomeOtherSymbol\n' >"$port_dir/no-sdl"
 	chmod +x "$port_dir/no-sdl"
+	printf 'legacy-cache\n' >"$port_dir/.pmi-port-probe-v1.tsv"
 
 	printf 'bundled-sdl\n' >"$pak_dir/runtime/aarch64/lib/libSDL2-2.0.so.0"
+	printf 'pulse-simple\n' >"$pak_dir/runtime/aarch64/pulse/libpulse-simple.so.0"
+	printf 'pulse\n' >"$pak_dir/runtime/aarch64/pulse/libpulse.so.0"
+	printf 'pulse-common\n' >"$pak_dir/runtime/aarch64/pulse/libpulsecommon-13.99.so"
 }
 
 add_native_gl_fixture() {
@@ -435,31 +474,89 @@ PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
 PMI_TEST_PORT_PROBE_LOG="$aarch64_wrap_root/port-probe.log" \
 run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
-grep -q '# PMI_AARCH64_SDL_COMPAT_WRAPPER=1' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse.original"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both.original"
+grep -q '# PMI_AARCH64_NATIVE_COMPAT_WRAPPER=1' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
 grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+grep -q '^PMI_USE_AARCH64_SDL_COMPAT="1"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+grep -q '^PMI_USE_AARCH64_PULSE_COMPAT="0"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
+grep -q '^PMI_USE_AARCH64_SDL_COMPAT="0"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse"
+grep -q '^PMI_USE_AARCH64_PULSE_COMPAT="1"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse"
+grep -q '^PMI_USE_AARCH64_SDL_COMPAT="1"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both"
+grep -q '^PMI_USE_AARCH64_PULSE_COMPAT="1"$' "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.original"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/no-sdl.original"
 test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/.pmi-port-probe-v1.tsv"
+test -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/.pmi-port-probe-v2.tsv"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
 test ! -f "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat.pmi-aarch64-sdl-compat"
 test "$(wc -l < "$aarch64_wrap_root/port-probe.log" | tr -d ' ')" = "2"
-grep -q "PMI_DIAG aarch64_sdl_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl" "$aarch64_wrap_root/PORTS.txt"
+grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl sdl=1 pulse=0" "$aarch64_wrap_root/PORTS.txt"
+grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse sdl=0 pulse=1" "$aarch64_wrap_root/PORTS.txt"
+grep -q "PMI_DIAG aarch64_native_compat_applied=$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both sdl=1 pulse=1" "$aarch64_wrap_root/PORTS.txt"
 PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
 PMI_TEST_PORT_PROBE_LOG="$aarch64_wrap_root/port-probe.log" \
 run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
 test "$(wc -l < "$aarch64_wrap_root/port-probe.log" | tr -d ' ')" = "2"
 
+cat >"$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both.original" <<EOF
+#!/bin/sh
+printf '%s\n' "\$LD_LIBRARY_PATH" >"$aarch64_wrap_root/.ports_temp/needs-both-ld.txt"
+exit 0
+EOF
+chmod +x "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both.original"
+mkdir -p "$aarch64_wrap_root/.ports_temp/ports"
+rm -rf "$aarch64_wrap_root/.ports_temp/ports/testaarch64"
+cp -R "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64" "$aarch64_wrap_root/.ports_temp/ports/testaarch64"
+: >"$aarch64_wrap_root/amixer.log"
+PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_RUN_AARCH64_BINARY="needs-both" \
+PMI_TEST_AMIXER_LOG="$aarch64_wrap_root/amixer.log" \
+run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
+unset PMI_TEST_RUN_AARCH64_BINARY PMI_TEST_AMIXER_LOG
+grep -q "^$aarch64_wrap_root/Emus/my355/PORTS.pak/runtime/aarch64/lib:$aarch64_wrap_root/Emus/my355/PORTS.pak/runtime/aarch64/pulse:$aarch64_wrap_root/Emus/my355/PORTS.pak/lib" "$aarch64_wrap_root/.ports_temp/needs-both-ld.txt"
+grep -q '^sget Playback Path$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sget SPK$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sset Playback Path OFF$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sset Playback Path SPK$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sset Speaker on$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sset Headphone on$' "$aarch64_wrap_root/amixer.log"
+grep -q '^sset SPK 2$' "$aarch64_wrap_root/amixer.log"
+
+cat >"$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original" <<EOF
+#!/bin/sh
+printf '%s\n' "\$LD_LIBRARY_PATH" >"$aarch64_wrap_root/.ports_temp/needs-sdl-ld.txt"
+exit 0
+EOF
+chmod +x "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
+rm -rf "$aarch64_wrap_root/.ports_temp/ports/testaarch64"
+cp -R "$aarch64_wrap_root/Roms/Ports (PORTS)/.ports/testaarch64" "$aarch64_wrap_root/.ports_temp/ports/testaarch64"
+: >"$aarch64_wrap_root/amixer.log"
+PMI_SDL2_SYSTEM_LIB="$aarch64_wrap_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_TEST_RUN_AARCH64_BINARY="needs-sdl" \
+PMI_TEST_AMIXER_LOG="$aarch64_wrap_root/amixer.log" \
+run_direct_launch_for_script "$aarch64_wrap_root" "TestAarch64.sh"
+unset PMI_TEST_RUN_AARCH64_BINARY PMI_TEST_AMIXER_LOG
+grep -q "^$aarch64_wrap_root/Emus/my355/PORTS.pak/runtime/aarch64/lib:$aarch64_wrap_root/Emus/my355/PORTS.pak/lib" "$aarch64_wrap_root/.ports_temp/needs-sdl-ld.txt"
+test ! -s "$aarch64_wrap_root/amixer.log"
+
 create_direct_launch_tree "$aarch64_skip_root"
 add_aarch64_sdl_fixture "$aarch64_skip_root"
 printf 'SDL_GetDefaultAudioInfo\n' >"$aarch64_skip_root/system-sdl/libSDL2-2.0.so.0"
+printf 'pulse-present\n' >"$aarch64_skip_root/system-pulse/libpulse-simple.so.0"
 PMI_SDL2_SYSTEM_LIB="$aarch64_skip_root/system-sdl/libSDL2-2.0.so.0" \
+PMI_PULSE_SIMPLE_SYSTEM_LIB="$aarch64_skip_root/system-pulse/libpulse-simple.so.0" \
 PMI_TEST_PORT_PROBE_LOG="$aarch64_skip_root/port-probe.log" \
 run_direct_launch_for_script "$aarch64_skip_root" "TestAarch64.sh"
 test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl"
 test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-sdl.original"
-! grep -q 'PMI_DIAG aarch64_sdl_compat_applied=' "$aarch64_skip_root/PORTS.txt"
+test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse"
+test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-pulse.original"
+test -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both"
+test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/needs-both.original"
+! grep -q 'PMI_DIAG aarch64_native_compat_applied=' "$aarch64_skip_root/PORTS.txt"
 test ! -f "$aarch64_skip_root/Roms/Ports (PORTS)/.ports/testaarch64/not-elf.pmi-aarch64-sdl-compat"
 test "$(wc -l < "$aarch64_skip_root/port-probe.log" | tr -d ' ')" = "1"
 

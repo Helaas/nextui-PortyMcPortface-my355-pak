@@ -22,14 +22,15 @@ port_without_gl="$tmpdir/port-without-gl"
 mkdir -p "$port_with_gl/dir" "$port_with_gl/deep/nested" "$port_with_gl/lib/libarm64" "$port_without_gl"
 
 create_elf_stub "$port_with_gl/needs-sdl" SDL_GetDefaultAudioInfo
+create_elf_stub "$port_with_gl/needs-pulse" libpulse-simple.so.0
 create_elf_stub "$port_with_gl/uses-gl" SDL_GL_CreateContext SDL_CreateWindow
-create_elf_stub "$port_with_gl/dir/mixed" SDL_GetDefaultAudioInfo SDL_GL_CreateContext SDL_CreateWindow
+create_elf_stub "$port_with_gl/dir/mixed" SDL_GetDefaultAudioInfo libpulse-simple.so.0 SDL_GL_CreateContext SDL_CreateWindow
 create_elf_stub "$port_with_gl/deep/nested/too-deep" SDL_GetDefaultAudioInfo
 create_elf_stub "$port_with_gl/libskip.so.1" SDL_GetDefaultAudioInfo
 create_elf_stub "$port_with_gl/wrapped-bin.original" SDL_GetDefaultAudioInfo
 printf '#!/bin/sh\n# PMI_AARCH64_SDL_COMPAT_WRAPPER=1\nexit 0\n' >"$port_with_gl/wrapped-bin"
 printf '#!/bin/sh\necho test\n' >"$port_with_gl/script.sh"
-printf 'cache\n' >"$port_with_gl/.pmi-port-probe-v1.tsv"
+printf 'cache\n' >"$port_with_gl/.pmi-port-probe-v2.tsv"
 printf 'not-elf\n' >"$port_with_gl/not-elf"
 printf 'egl\n' >"$port_with_gl/lib/libarm64/libEGL.so.1"
 
@@ -37,16 +38,17 @@ create_elf_stub "$port_without_gl/no-sdl" SomeOtherSymbol
 
 output="$("$helper" scan-aarch64-launch-port "$port_with_gl")"
 printf '%s\n' "$output" | grep -Fx "PORT	$port_with_gl	has_bundled_native_gl_stack=1"
-printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/dir/mixed	needs_default_audio_info=1	uses_sdl_gl_windowing=1	is_wrapper=0"
-printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/needs-sdl	needs_default_audio_info=1	uses_sdl_gl_windowing=0	is_wrapper=0"
-printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/uses-gl	needs_default_audio_info=0	uses_sdl_gl_windowing=1	is_wrapper=0"
-printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/wrapped-bin	needs_default_audio_info=1	uses_sdl_gl_windowing=0	is_wrapper=1"
+printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/dir/mixed	needs_default_audio_info=1	needs_pulse_simple=1	uses_sdl_gl_windowing=1	is_wrapper=0"
+printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/needs-pulse	needs_default_audio_info=0	needs_pulse_simple=1	uses_sdl_gl_windowing=0	is_wrapper=0"
+printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/needs-sdl	needs_default_audio_info=1	needs_pulse_simple=0	uses_sdl_gl_windowing=0	is_wrapper=0"
+printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/uses-gl	needs_default_audio_info=0	needs_pulse_simple=0	uses_sdl_gl_windowing=1	is_wrapper=0"
+printf '%s\n' "$output" | grep -Fx "BIN	$port_with_gl/wrapped-bin	needs_default_audio_info=1	needs_pulse_simple=0	uses_sdl_gl_windowing=0	is_wrapper=1"
 ! printf '%s\n' "$output" | grep -Fq "$port_with_gl/script.sh"
 ! printf '%s\n' "$output" | grep -Fq "$port_with_gl/libskip.so.1"
-! printf '%s\n' "$output" | grep -Fq "$port_with_gl/.pmi-port-probe-v1.tsv"
+! printf '%s\n' "$output" | grep -Fq "$port_with_gl/.pmi-port-probe-v2.tsv"
 ! printf '%s\n' "$output" | grep -Fq "$port_with_gl/deep/nested/too-deep"
 ! printf '%s\n' "$output" | grep -Fq "$port_with_gl/not-elf"
 
 output_without_gl="$("$helper" scan-aarch64-launch-port "$port_without_gl")"
 printf '%s\n' "$output_without_gl" | grep -Fx "PORT	$port_without_gl	has_bundled_native_gl_stack=0"
-printf '%s\n' "$output_without_gl" | grep -Fx "BIN	$port_without_gl/no-sdl	needs_default_audio_info=0	uses_sdl_gl_windowing=0	is_wrapper=0"
+printf '%s\n' "$output_without_gl" | grep -Fx "BIN	$port_without_gl/no-sdl	needs_default_audio_info=0	needs_pulse_simple=0	uses_sdl_gl_windowing=0	is_wrapper=0"

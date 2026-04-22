@@ -50,6 +50,9 @@ $(RUNTIME_BIN_DIR):
 $(RUNTIME_BIN_DIR)/aarch64:
 	@mkdir -p "$@"
 
+$(RUNTIME_BIN_DIR)/aarch64/pulse:
+	@mkdir -p "$@"
+
 $(RUNTIME_CACHE_DIR):
 	@mkdir -p "$@"
 
@@ -75,7 +78,16 @@ $(RUNTIME_BOX64_LIBS_STAMP): scripts/fetch-box64-runtime-libs.sh | $(RUNTIME_BIN
 $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0: third_party/sdl2/my355/libSDL2-2.0.so.0 | $(RUNTIME_BIN_DIR)/aarch64
 	cp third_party/sdl2/my355/libSDL2-2.0.so.0 "$@"
 
-$(RUNTIME_STAMP): $(RUNTIME_HELPERS_STAMP) $(RUNTIME_BIN_DIR)/box64 $(RUNTIME_BOX64_LIBS_STAMP) $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0
+$(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse-simple.so.0: third_party/pulse/my355/libpulse-simple.so.0 | $(RUNTIME_BIN_DIR)/aarch64/pulse
+	cp third_party/pulse/my355/libpulse-simple.so.0 "$@"
+
+$(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse.so.0: third_party/pulse/my355/libpulse.so.0 | $(RUNTIME_BIN_DIR)/aarch64/pulse
+	cp third_party/pulse/my355/libpulse.so.0 "$@"
+
+$(RUNTIME_BIN_DIR)/aarch64/pulse/libpulsecommon-13.99.so: third_party/pulse/my355/libpulsecommon-13.99.so | $(RUNTIME_BIN_DIR)/aarch64/pulse
+	cp third_party/pulse/my355/libpulsecommon-13.99.so "$@"
+
+$(RUNTIME_STAMP): $(RUNTIME_HELPERS_STAMP) $(RUNTIME_BIN_DIR)/box64 $(RUNTIME_BOX64_LIBS_STAMP) $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse-simple.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulsecommon-13.99.so
 	@touch $@
 
 build/my355/runtime-bin/.stamp: $(RUNTIME_STAMP)
