@@ -715,6 +715,7 @@ write_armhf_exec_compat_wrapper() {
 
     cat >"$wrapper_path" <<'EOF'
 #!/bin/sh
+# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1
 set -eu
 
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -778,6 +779,51 @@ EOF
     chmod +x "$wrapper_path" 2>/dev/null || true
 }
 
+is_armhf_exec_wrapper() {
+    local file="$1"
+
+    [ -f "$file" ] || return 1
+    head -n 2 "$file" 2>/dev/null | grep -Eq '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$'
+}
+
+is_armhf_elf_binary() {
+    local file="$1"
+
+    [ -f "$file" ] || return 1
+
+    set -- $(dd if="$file" bs=1 count=20 2>/dev/null | od -An -tx1 -v 2>/dev/null)
+    [ $# -ge 20 ] || return 1
+
+    [ "$1" = "7f" ] &&
+        [ "$2" = "45" ] &&
+        [ "$3" = "4c" ] &&
+        [ "$4" = "46" ] &&
+        [ "$5" = "01" ] &&
+        [ "${19}" = "28" ] &&
+        [ "${20}" = "00" ]
+}
+
+is_armhf_launch_binary() {
+    local file="$1"
+    local base_name
+
+    [ -f "$file" ] || return 1
+    base_name=$(basename "$file")
+
+    case "$base_name" in
+        *.sh|*.bash|*.so|*.so.*|*.original)
+            return 1
+            ;;
+    esac
+
+    if is_armhf_exec_wrapper "$file"; then
+        return 0
+    fi
+
+    [ -x "$file" ] || return 1
+    is_armhf_elf_binary "$file"
+}
+
 refresh_box_runtime_wrappers() {
     local search_path="$1"
     local file
@@ -799,13 +845,20 @@ refresh_box_runtime_wrappers() {
 
 refresh_armhf_binary_wrappers() {
     local search_path="$1"
-    local file
+    local port_json port_dir file
 
     [ -d "$search_path" ] || return 0
 
-    find "$search_path" -type f -name 'gmloader' | while IFS= read -r file || [ -n "$file" ]; do
-        [ -n "$file" ] || continue
-        write_armhf_exec_compat_wrapper "$file"
+    for port_json in "$search_path"/*/port.json; do
+        [ -f "$port_json" ] || continue
+        port_has_arch "$port_json" "armhf" || continue
+
+        port_dir=$(dirname "$port_json")
+        find "$port_dir" -maxdepth 2 -type f -perm -111 | while IFS= read -r file || [ -n "$file" ]; do
+            [ -n "$file" ] || continue
+            is_armhf_launch_binary "$file" || continue
+            write_armhf_exec_compat_wrapper "$file"
+        done
     done
 }
 

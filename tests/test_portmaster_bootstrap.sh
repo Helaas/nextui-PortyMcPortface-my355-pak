@@ -269,11 +269,12 @@ EOF
 }
 EOF
 
-	cat >"$port_dir/gmloader" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
+	printf '\177ELF\001\001\001\000\000\000\000\000\000\000\000\000\002\000\050\000gmloader\n' >"$port_dir/gmloader"
 	chmod +x "$port_dir/gmloader"
+	printf '\177ELF\001\001\001\000\000\000\000\000\000\000\000\000\002\000\050\000bgdi\n' >"$port_dir/bgdi"
+	chmod +x "$port_dir/bgdi"
+	printf 'not-elf-data\n' >"$port_dir/SorR.dat"
+	chmod +x "$port_dir/SorR.dat"
 }
 
 run_direct_launch_for_script() {
@@ -439,7 +440,14 @@ test ! -f "$success_root/Emus/my355/PORTS.pak/lib/._junk"
 test ! -f "$success_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
 test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader.original"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi.original"
+test -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat"
+test ! -f "$success_root/Roms/Ports (PORTS)/.ports/testport/SorR.dat.original"
+grep -q '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$' "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
 grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$success_root/Roms/Ports (PORTS)/.ports/testport/gmloader"
+grep -q '^# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1$' "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
+grep -q 'REAL_BINARY="\$SELF_DIR/\${SELF_NAME}\.original"' "$success_root/Roms/Ports (PORTS)/.ports/testport/bgdi"
 
 create_direct_launch_tree "$joy_override_root"
 printf '0 [-1=none 0=miyoo 1=xbox]\n' >"$joy_override_root/joy_type"
