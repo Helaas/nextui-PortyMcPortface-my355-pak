@@ -4,7 +4,9 @@
 #include "json.h"
 #include "process.h"
 
+#include <dirent.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +25,15 @@ static int resolve_extractor_command(char *buffer, size_t buffer_size, const cha
 static int ensure_file_parent_dir(const char *path);
 static int download_if_missing(const char *url, const char *output_path);
 static int install_armhf_runtime(const install_layout *layout);
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...);
+static int replace_portmaster_runtime_preserving_downloaded_runtimes(const char *src, const char *dst);
+static int preserve_downloaded_runtime_artifacts(const char *runtime_dir, const char *preserve_root);
+static int restore_downloaded_runtime_artifacts(const char *preserve_root, const char *runtime_dir);
+static int copy_matching_runtime_artifacts(const char *src_dir, const char *dst_dir,
+    int (*should_copy)(const char *name), int overwrite);
+static int should_preserve_runtime_lib(const char *name);
+static int should_preserve_runtime_autoinstall(const char *name);
+static int has_suffix(const char *value, const char *suffix);
 
 static const char *ASYNC_JPEG_IMAGE_MANAGER_PATCH =
     "        import queue\n"
@@ -244,7 +255,7 @@ int extract_stage_archive(const char *tool_pak_dir, const char *archive_path, co
     char quoted_extractor[PATH_MAX];
     char quoted_archive[PATH_MAX];
     char quoted_extract_dir[PATH_MAX];
-    char command[PATH_MAX * 3];
+    char command[PATH_MAX * 3 + 32];
 
     if (resolve_extractor_command(extractor, sizeof(extractor), tool_pak_dir) != 0)
         return -1;
@@ -256,7 +267,9 @@ int extract_stage_archive(const char *tool_pak_dir, const char *archive_path, co
     if (fs_ensure_dir(extract_dir) != 0)
         return -1;
 
-    snprintf(command, sizeof(command), "%s x -y %s -o%s", quoted_extractor, quoted_archive, quoted_extract_dir);
+    if (format_checked(command, sizeof(command), "%s x -y %s -o%s",
+            quoted_extractor, quoted_archive, quoted_extract_dir) != 0)
+        return -1;
     return run_command(command);
 }
 
@@ -304,7 +317,7 @@ int install_from_stage(const char *stage_root, const install_layout *layout, con
 
     snprintf(src, sizeof(src), "%s/PortMaster", stage_root);
     snprintf(dst, sizeof(dst), "%s/PortMaster", layout->payload_pak_dir);
-    if (replace_tree(src, dst) != 0)
+    if (replace_portmaster_runtime_preserving_downloaded_runtimes(src, dst) != 0)
         return -1;
 
     if (copy_payload_compatibility_files(layout) != 0)
@@ -328,6 +341,130 @@ int install_from_stage(const char *stage_root, const install_layout *layout, con
         return -1;
 
     return 0;
+}
+
+static int replace_portmaster_runtime_preserving_downloaded_runtimes(const char *src, const char *dst) {
+    char preserve_template[] = "/tmp/porty-runtime-preserve-XXXXXX";
+    char *preserve_root;
+
+    preserve_root = mkdtemp(preserve_template);
+    if (preserve_root == NULL)
+        return -1;
+
+    if (preserve_downloaded_runtime_artifacts(dst, preserve_root) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    if (replace_tree(src, dst) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    if (restore_downloaded_runtime_artifacts(preserve_root, dst) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    (void)fs_remove_path(preserve_root);
+    return 0;
+}
+
+static int preserve_downloaded_runtime_artifacts(const char *runtime_dir, const char *preserve_root) {
+    char src_dir[PATH_MAX];
+    char dst_dir[PATH_MAX];
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/libs", runtime_dir) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/libs", preserve_root) != 0)
+        return -1;
+    if (copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_lib, 1) != 0)
+        return -1;
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/autoinstall", runtime_dir) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/autoinstall", preserve_root) != 0)
+        return -1;
+    return copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_autoinstall, 1);
+}
+
+static int restore_downloaded_runtime_artifacts(const char *preserve_root, const char *runtime_dir) {
+    char src_dir[PATH_MAX];
+    char dst_dir[PATH_MAX];
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/libs", preserve_root) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/libs", runtime_dir) != 0)
+        return -1;
+    if (copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_lib, 0) != 0)
+        return -1;
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/autoinstall", preserve_root) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/autoinstall", runtime_dir) != 0)
+        return -1;
+    return copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_autoinstall, 0);
+}
+
+static int copy_matching_runtime_artifacts(const char *src_dir, const char *dst_dir,
+    int (*should_copy)(const char *name), int overwrite) {
+    DIR *dir;
+    struct dirent *entry;
+
+    if (!fs_path_exists(src_dir))
+        return 0;
+
+    dir = opendir(src_dir);
+    if (dir == NULL)
+        return -1;
+
+    while ((entry = readdir(dir)) != NULL) {
+        char src_path[PATH_MAX];
+        char dst_path[PATH_MAX];
+        struct stat st;
+
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        if (!should_copy(entry->d_name))
+            continue;
+        if (format_checked(src_path, sizeof(src_path), "%s/%s", src_dir, entry->d_name) != 0 ||
+                format_checked(dst_path, sizeof(dst_path), "%s/%s", dst_dir, entry->d_name) != 0) {
+            closedir(dir);
+            return -1;
+        }
+        if (lstat(src_path, &st) != 0) {
+            closedir(dir);
+            return -1;
+        }
+        if (!S_ISREG(st.st_mode))
+            continue;
+        if (!overwrite && fs_path_exists(dst_path))
+            continue;
+        if (copy_file(src_path, dst_path) != 0) {
+            closedir(dir);
+            return -1;
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+static int should_preserve_runtime_lib(const char *name) {
+    return has_suffix(name, ".squashfs");
+}
+
+static int should_preserve_runtime_autoinstall(const char *name) {
+    return strcmp(name, "runtimes.zip") == 0 || has_suffix(name, ".squashfs");
+}
+
+static int has_suffix(const char *value, const char *suffix) {
+    size_t value_len;
+    size_t suffix_len;
+
+    if (value == NULL || suffix == NULL)
+        return 0;
+
+    value_len = strlen(value);
+    suffix_len = strlen(suffix);
+    return value_len >= suffix_len &&
+        strcmp(value + value_len - suffix_len, suffix) == 0;
 }
 
 static int copy_payload_compatibility_files(const install_layout *layout) {
@@ -618,6 +755,20 @@ static int ensure_file_parent_dir(const char *path) {
     return fs_ensure_dir(parent);
 }
 
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...) {
+    va_list args;
+    int written;
+
+    if (buffer == NULL || buffer_size == 0 || format == NULL)
+        return -1;
+
+    va_start(args, format);
+    written = vsnprintf(buffer, buffer_size, format, args);
+    va_end(args);
+
+    return written >= 0 && (size_t)written < buffer_size ? 0 : -1;
+}
+
 static int download_if_missing(const char *url, const char *output_path) {
     if (fs_path_exists(output_path))
         return 0;
@@ -637,8 +788,9 @@ static int install_armhf_runtime(const install_layout *layout) {
     };
     size_t index;
 
-    snprintf(src, sizeof(src), "%s/armhf", layout->runtime_tools_dir);
-    snprintf(dst, sizeof(dst), "%s/runtime/armhf", layout->payload_pak_dir);
+    if (format_checked(src, sizeof(src), "%s/armhf", layout->runtime_tools_dir) != 0 ||
+            format_checked(dst, sizeof(dst), "%s/runtime/armhf", layout->payload_pak_dir) != 0)
+        return -1;
     if (fs_path_exists(src))
         return replace_tree(src, dst);
 
@@ -648,8 +800,9 @@ static int install_armhf_runtime(const install_layout *layout) {
     for (index = 0; index < sizeof(parts) / sizeof(parts[0]); index++) {
         char output_path[PATH_MAX];
 
-        snprintf(url, sizeof(url), "%s/%s", SPRUCE_FLIP_RAW_BASE, parts[index]);
-        snprintf(output_path, sizeof(output_path), "%s/%s", dst, parts[index]);
+        if (format_checked(url, sizeof(url), "%s/%s", SPRUCE_FLIP_RAW_BASE, parts[index]) != 0 ||
+                format_checked(output_path, sizeof(output_path), "%s/%s", dst, parts[index]) != 0)
+            return -1;
         if (download_if_missing(url, output_path) != 0)
             return -1;
     }
@@ -664,9 +817,10 @@ static int unpack_runtime_pylibs(const install_layout *layout) {
     char quoted_runtime_dir[PATH_MAX];
     char command[PATH_MAX * 2];
 
-    snprintf(runtime_dir, sizeof(runtime_dir), "%s/PortMaster", layout->payload_pak_dir);
-    snprintf(pylibs_zip, sizeof(pylibs_zip), "%s/pylibs.zip", runtime_dir);
-    snprintf(pylibs_md5, sizeof(pylibs_md5), "%s/pylibs.zip.md5", runtime_dir);
+    if (format_checked(runtime_dir, sizeof(runtime_dir), "%s/PortMaster", layout->payload_pak_dir) != 0 ||
+            format_checked(pylibs_zip, sizeof(pylibs_zip), "%s/pylibs.zip", runtime_dir) != 0 ||
+            format_checked(pylibs_md5, sizeof(pylibs_md5), "%s/pylibs.zip.md5", runtime_dir) != 0)
+        return -1;
 
     if (!fs_path_exists(pylibs_zip))
         return 0;
@@ -674,9 +828,10 @@ static int unpack_runtime_pylibs(const install_layout *layout) {
     if (shell_quote(quoted_runtime_dir, sizeof(quoted_runtime_dir), runtime_dir) != 0)
         return -1;
 
-    snprintf(command, sizeof(command),
-        "cd %s && unzip -oq pylibs.zip && rm -f pylibs.zip pylibs.zip.md5",
-        quoted_runtime_dir);
+    if (format_checked(command, sizeof(command),
+            "cd %s && unzip -oq pylibs.zip && rm -f pylibs.zip pylibs.zip.md5",
+            quoted_runtime_dir) != 0)
+        return -1;
     if (run_command(command) != 0)
         return -1;
 

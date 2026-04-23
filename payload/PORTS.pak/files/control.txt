@@ -19,7 +19,7 @@ fi
 
 export ESUDO=""
 export ESUDOKILL="-1"
-export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+export SDL_GAMECONTROLLERCONFIG_FILE="${PMI_GAMECONTROLLERDB_FILE:-$controlfolder/gamecontrollerdb.txt}"
 
 get_controls() {
   LOWRES="N"

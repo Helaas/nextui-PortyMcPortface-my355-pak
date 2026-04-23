@@ -13,6 +13,16 @@ static void join_path(char *buffer, size_t buffer_size, const char *root, const 
     snprintf(buffer, buffer_size, "%s/%s", root, suffix);
 }
 
+static void assert_text_file_equals(const char *path, const char *expected) {
+    char *content = NULL;
+    size_t len = 0;
+
+    assert(read_text_file_alloc(path, &content, &len) == 0);
+    assert(strcmp(content, expected) == 0);
+    free(content);
+    (void)len;
+}
+
 int main(void) {
     char root_template[] = "/tmp/pm-installer-test-XXXXXX";
     char *root = mkdtemp(root_template);
@@ -50,6 +60,8 @@ int main(void) {
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/runtime.txt", stage_root);
     assert(write_text_file(file_path, "runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", stage_root);
+    assert(write_text_file(file_path, "fresh-upstream-runtime") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pugwash", stage_root);
     assert(write_text_file(file_path,
         "#!/usr/bin/env python3\n"
@@ -288,6 +300,25 @@ int main(void) {
     layout.manifest_path = manifest_path;
     layout.platform_name = "my355";
 
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/mono-6.12.0.122-aarch64.squashfs", payload_dir);
+    assert(write_text_file(file_path, "downloaded-mono-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", payload_dir);
+    assert(write_text_file(file_path, "old-downloaded-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/libsomething.so", payload_dir);
+    assert(write_text_file(file_path, "do-not-preserve") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/runtime-dir.squashfs", payload_dir);
+    assert(fs_ensure_dir(file_path) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/pending-runtime.squashfs", payload_dir);
+    assert(write_text_file(file_path, "pending-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/runtimes.zip", payload_dir);
+    assert(write_text_file(file_path, "pending-runtime-zip") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/readme.txt", payload_dir);
+    assert(write_text_file(file_path, "do-not-preserve") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/stale-local-file.txt", payload_dir);
+    assert(write_text_file(file_path, "remove-me") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
+    assert(write_text_file(file_path, "stale-vendored-lib") == 0);
+
     assert(install_from_stage(stage_root, &layout, &state) == 0);
     assert(stat(layout.rom_stub_path, &st) == 0);
     assert(stat(layout.manifest_path, &st) == 0);
@@ -296,6 +327,22 @@ int main(void) {
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/runtime.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/stale-local-file.txt", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/mono-6.12.0.122-aarch64.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "downloaded-mono-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "fresh-upstream-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/libsomething.so", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/runtime-dir.squashfs", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/pending-runtime.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "pending-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/runtimes.zip", payload_dir);
+    assert_text_file_equals(file_path, "pending-runtime-zip");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/readme.txt", payload_dir);
+    assert(stat(file_path, &st) != 0);
     snprintf(file_path, sizeof(file_path), "%s/files/config.json", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/PortMaster.txt", payload_dir);
@@ -359,7 +406,7 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/pulse/libpulsecommon-13.99.so", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
-    assert(stat(file_path, &st) == 0);
+    assert_text_file_equals(file_path, "i386-libstdc++");
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libgcc_s.so.1", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-x86_64-linux-gnu/libc.so.6", payload_dir);
@@ -399,6 +446,7 @@ int main(void) {
     assert(strstr(file_content, "if [ \"${PMI_LD_LIBRARY_STRATEGY:-}\" = \"system-gl\" ]; then") != NULL);
     assert(strstr(file_content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib\"") != NULL);
     assert(strstr(file_content, "export LD_LIBRARY_PATH=\"${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
+    assert(strstr(file_content, "PMI_GAMECONTROLLERDB_FILE:-$controlfolder/gamecontrollerdb.txt") != NULL);
     assert(strstr(file_content, "SDL_GAMECONTROLLERCONFIG=") == NULL);
     assert(strstr(file_content, "source \"$controlfolder/device_info.txt\"") != NULL);
     assert(strstr(file_content, "source \"$controlfolder/funcs.txt\"") != NULL);
@@ -424,9 +472,13 @@ int main(void) {
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$PM_RUNTIME_ROOT/autoinstall\"") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$XDG_DATA_HOME/PortMaster/autoinstall\"") != NULL);
     assert(strstr(file_content, "active_controller_db_source()") != NULL);
-    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_layout=$controller_layout\"") != NULL);
+    assert(strstr(file_content, "controller_db_src=$(default_controller_db_source)") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_layout=xbox\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_db_source=$controller_db_src\"") != NULL);
     assert(strstr(file_content, "PMI_DIAG overlay_controller_db=$PM_RUNTIME_ROOT/gamecontrollerdb.txt") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG port_controller_layout=$controller_layout\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG port_controller_db_source=$controller_db_src\"") != NULL);
+    assert(strstr(file_content, "PMI_GAMECONTROLLERDB_FILE=\"$controller_db_src\" SDL_GAMECONTROLLERCONFIG_FILE=\"$controller_db_src\" bash \"$script_to_run\"") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/bin.tar.gz\" \"$PAK_DIR/bin\"") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/lib.tar.gz\" \"$PAK_DIR/lib\"") != NULL);
     assert(strstr(file_content, "cp -f \"$PAK_DIR/files/libffi.so.7\" \"$PAK_DIR/lib/libffi.so.7\"") != NULL);

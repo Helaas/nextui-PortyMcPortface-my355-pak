@@ -3,26 +3,11 @@
 #include "apostrophe.h"
 #include "apostrophe_widgets.h"
 
-static void format_release_date(const char *published_at, char *buffer, size_t buffer_size) {
-    if (buffer == NULL || buffer_size == 0)
-        return;
-
-    if (published_at != NULL && published_at[0] != '\0' && strlen(published_at) >= 10) {
-        snprintf(buffer, buffer_size, "%.10s", published_at);
-    } else {
-        snprintf(buffer, buffer_size, "unknown");
-    }
-}
-
 int run_updater_ui(const status_model *model, ui_updater_choice *choice) {
     ap_theme *theme;
     TTF_Font *msg_font;
-    ap_footer_item footer[] = {
-        { .button = AP_BTN_Y, .label = "SETTINGS" },
-        { .button = AP_BTN_X, .label = "REINSTALL" },
-        { .button = AP_BTN_B, .label = "QUIT" },
-        { .button = AP_BTN_A, .label = model->action == ACTION_NONE ? "CLOSE" : "RUN", .is_confirm = true },
-    };
+    ap_footer_item footer[4];
+    int footer_count = 0;
     int screen_w;
     int screen_h;
     int msg_h;
@@ -32,6 +17,13 @@ int run_updater_ui(const status_model *model, ui_updater_choice *choice) {
 
     if (model == NULL || choice == NULL)
         return AP_ERROR;
+
+    footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_B, .label = "QUIT" };
+    footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_X, .label = "REINSTALL" };
+    footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_Y, .label = "SETTINGS", .is_confirm = true };
+    if (model->action != ACTION_NONE) {
+        footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_A, .label = "RUN", .is_confirm = true };
+    }
 
     *choice = UI_UPDATER_CANCEL;
     theme = ap_get_theme();
@@ -53,9 +45,11 @@ int run_updater_ui(const status_model *model, ui_updater_choice *choice) {
 
             switch (ev.button) {
                 case AP_BTN_A:
-                    *choice = UI_UPDATER_RUN;
-                    rc = AP_OK;
-                    running = 0;
+                    if (model->action != ACTION_NONE) {
+                        *choice = UI_UPDATER_RUN;
+                        rc = AP_OK;
+                        running = 0;
+                    }
                     break;
                 case AP_BTN_X:
                     *choice = UI_UPDATER_FORCE_REINSTALL;
@@ -85,7 +79,7 @@ int run_updater_ui(const status_model *model, ui_updater_choice *choice) {
             ap_scale(40), base_y,
             screen_w - ap_scale(80),
             theme->text, AP_ALIGN_CENTER);
-        ap_draw_footer(footer, 4);
+        ap_draw_footer(footer, footer_count);
         ap_present();
     }
 
@@ -115,41 +109,6 @@ int show_unsupported_warning(const char *message, ui_warning_choice *choice) {
     return rc;
 }
 
-int show_version_picker(const remote_metadata *releases, int count, int current_index, int *selected_index) {
-    ap_list_item items[MAX_REMOTE_RELEASES];
-    char trailing_text[MAX_REMOTE_RELEASES][16];
-    ap_footer_item footer[] = {
-        { .button = AP_BTN_B, .label = "BACK" },
-        { .button = AP_BTN_A, .label = "SELECT", .is_confirm = true },
-    };
-    ap_list_opts opts;
-    ap_list_result result;
-    int index;
-
-    if (releases == NULL || selected_index == NULL || count <= 0 || count > MAX_REMOTE_RELEASES)
-        return AP_ERROR;
-
-    memset(items, 0, sizeof(items));
-    memset(trailing_text, 0, sizeof(trailing_text));
-    for (index = 0; index < count; index++) {
-        format_release_date(releases[index].published_at, trailing_text[index], sizeof(trailing_text[index]));
-        items[index].label = releases[index].runtime_version;
-        items[index].trailing_text = trailing_text[index];
-    }
-
-    opts = ap_list_default_opts("Choose Version", items, count);
-    opts.footer = footer;
-    opts.footer_count = 2;
-    opts.initial_index = current_index;
-    opts.confirm_button = AP_BTN_A;
-
-    if (ap_list(&opts, &result) != AP_OK || result.action == AP_ACTION_BACK || result.selected_index < 0)
-        return AP_CANCELLED;
-
-    *selected_index = result.selected_index;
-    return AP_OK;
-}
-
 int show_settings_screen(const remote_metadata *releases, int count,
     int current_index, controller_layout current_layout,
     int *selected_index, controller_layout *selected_layout) {
@@ -158,85 +117,63 @@ int show_settings_screen(const remote_metadata *releases, int count,
         { .label = "Nintendo", .value = "nintendo" },
     };
     ap_footer_item footer[] = {
-        { .button = AP_BTN_B, .label = "BACK" },
         { .button = AP_BTN_LEFT, .label = "CHANGE", .button_text = "\xe2\x86\x90/\xe2\x86\x92" },
-        { .button = AP_BTN_A, .label = "SELECT", .is_confirm = true },
-        { .button = AP_BTN_X, .label = "SAVE" },
+        { .button = AP_BTN_B, .label = "BACK" },
+        { .button = AP_BTN_START, .label = "SAVE", .is_confirm = true },
     };
-    int staged_index;
-    controller_layout staged_layout;
-    int focus_index = 0;
-    int visible_start = 0;
+    ap_option version_options[MAX_REMOTE_RELEASES];
+    ap_options_item items[2];
+    ap_options_list_opts opts;
+    ap_options_list_result result = {0};
+    int index;
 
     if (releases == NULL || selected_index == NULL || selected_layout == NULL ||
             count <= 0 || count > MAX_REMOTE_RELEASES || current_index < 0 || current_index >= count)
         return AP_ERROR;
 
-    staged_index = current_index;
-    staged_layout = current_layout;
-
-    for (;;) {
-        char version_label[96];
-        ap_option version_option[1];
-        ap_options_item items[2];
-        ap_options_list_opts opts;
-        ap_options_list_result result = {0};
-        int rc;
-
-        snprintf(version_label, sizeof(version_label), "%.95s", releases[staged_index].runtime_version);
-        version_option[0].label = version_label;
-        version_option[0].value = version_label;
-
-        memset(items, 0, sizeof(items));
-        items[0].label = "Controller Layout";
-        items[0].type = AP_OPT_STANDARD;
-        items[0].options = layout_options;
-        items[0].option_count = 2;
-        items[0].selected_option = staged_layout == CONTROLLER_LAYOUT_NINTENDO ? 1 : 0;
-
-        items[1].label = "PortMaster Version";
-        items[1].type = AP_OPT_CLICKABLE;
-        items[1].options = version_option;
-        items[1].option_count = 1;
-        items[1].selected_option = 0;
-
-        memset(&opts, 0, sizeof(opts));
-        opts.title = "Settings";
-        opts.items = items;
-        opts.item_count = 2;
-        opts.footer = footer;
-        opts.footer_count = 4;
-        opts.initial_selected_index = focus_index;
-        opts.visible_start_index = visible_start;
-        opts.action_button = AP_BTN_X;
-        opts.label_font = ap_get_font(AP_FONT_MEDIUM);
-        opts.value_font = ap_get_font(AP_FONT_TINY);
-
-        rc = ap_options_list(&opts, &result);
-        if (rc != AP_OK || result.action == AP_ACTION_BACK)
-            return AP_CANCELLED;
-
-        focus_index = result.focused_index >= 0 ? result.focused_index : focus_index;
-        visible_start = result.visible_start_index;
-        staged_layout = result.items[0].selected_option == 1
-            ? CONTROLLER_LAYOUT_NINTENDO : CONTROLLER_LAYOUT_X360;
-
-        if (result.action == AP_ACTION_TRIGGERED) {
-            *selected_index = staged_index;
-            *selected_layout = staged_layout;
-            return AP_OK;
-        }
-
-        if (result.action == AP_ACTION_SELECTED && result.focused_index == 1) {
-            int picker_index = staged_index;
-
-            if (show_version_picker(releases, count, staged_index, &picker_index) == AP_OK &&
-                    picker_index >= 0 && picker_index < count) {
-                staged_index = picker_index;
-            }
-            focus_index = 1;
-        }
+    memset(version_options, 0, sizeof(version_options));
+    for (index = 0; index < count; index++) {
+        version_options[index].label = releases[index].runtime_version;
+        version_options[index].value = releases[index].runtime_version;
     }
+
+    memset(items, 0, sizeof(items));
+    items[0].label = "Controller Layout";
+    items[0].type = AP_OPT_STANDARD;
+    items[0].options = layout_options;
+    items[0].option_count = 2;
+    items[0].selected_option = current_layout == CONTROLLER_LAYOUT_NINTENDO ? 1 : 0;
+
+    items[1].label = "PortMaster Version";
+    items[1].type = AP_OPT_STANDARD;
+    items[1].options = version_options;
+    items[1].option_count = count;
+    items[1].selected_option = current_index;
+
+    memset(&opts, 0, sizeof(opts));
+    opts.title = "Settings";
+    opts.items = items;
+    opts.item_count = 2;
+    opts.footer = footer;
+    opts.footer_count = 3;
+    opts.confirm_button = AP_BTN_START;
+    opts.label_font = ap_get_font(AP_FONT_MEDIUM);
+    opts.value_font = ap_get_font(AP_FONT_TINY);
+
+    if (ap_options_list(&opts, &result) != AP_OK || result.action == AP_ACTION_BACK)
+        return AP_CANCELLED;
+
+    if (result.action != AP_ACTION_CONFIRMED)
+        return AP_CANCELLED;
+
+    if (items[0].selected_option < 0 || items[0].selected_option >= 2 ||
+            items[1].selected_option < 0 || items[1].selected_option >= count)
+        return AP_ERROR;
+
+    *selected_layout = items[0].selected_option == 1
+        ? CONTROLLER_LAYOUT_NINTENDO : CONTROLLER_LAYOUT_X360;
+    *selected_index = items[1].selected_option;
+    return AP_OK;
 }
 
 int show_message_box(const char *message) {

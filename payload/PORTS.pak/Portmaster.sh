@@ -252,6 +252,10 @@ requested_controller_layout() {
     fi
 }
 
+default_controller_db_source() {
+    printf '%s/files/gamecontrollerdb.txt\n' "$PAK_DIR"
+}
+
 active_controller_db_source() {
     local requested_layout
 
@@ -332,7 +336,7 @@ runtime_overlay_is_stale() {
     local controller_db_src
     local stamp_path
 
-    controller_db_src=$(active_controller_db_source)
+    controller_db_src=$(default_controller_db_source)
     stamp_path=$(overlay_sync_stamp_path)
     [ -f "$stamp_path" ] || return 0
 
@@ -355,14 +359,10 @@ runtime_overlay_is_stale() {
 ensure_runtime_parity_overlay() {
     local xdg_pm_dir="$XDG_DATA_HOME/PortMaster"
     local controller_db_src
-    local controller_layout
-    local sentinel_path
     local stamp_path
 
     mkdir -p "$xdg_pm_dir"
-    controller_db_src=$(active_controller_db_source)
-    controller_layout=$(active_controller_layout)
-    sentinel_path=$(active_controller_layout_sentinel)
+    controller_db_src=$(default_controller_db_source)
     stamp_path=$(overlay_sync_stamp_path)
     if runtime_overlay_is_stale "$xdg_pm_dir"; then
         sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/control.txt"
@@ -385,10 +385,7 @@ ensure_runtime_parity_overlay() {
 
     echo "PMI_DIAG overlay_runtime_root=$PM_RUNTIME_ROOT"
     echo "PMI_DIAG overlay_xdg_root=$xdg_pm_dir"
-    echo "PMI_DIAG overlay_controller_layout=$controller_layout"
-    if [ -n "$sentinel_path" ]; then
-        echo "PMI_DIAG overlay_controller_layout_sentinel=$sentinel_path"
-    fi
+    echo "PMI_DIAG overlay_controller_layout=xbox"
     echo "PMI_DIAG overlay_controller_db_source=$controller_db_src"
     echo "PMI_DIAG overlay_controller_db=$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
 }
@@ -1882,6 +1879,9 @@ launch_port_script() {
     local source_script="${PMI_PORT_SCRIPT:-$ROM_PATH}"
     local script_to_run
     local armhf_port_dir
+    local controller_db_src
+    local controller_layout
+    local sentinel_path
 
     ensure_global_port_repairs
     refresh_armhf_binary_wrappers_for_launcher "$source_script"
@@ -1889,6 +1889,14 @@ launch_port_script() {
     script_to_run=$(stage_launch_script "$source_script")
     echo "PMI_DIAG selected_port_script=$source_script"
     echo "PMI_DIAG rewritten_launch_path=$script_to_run"
+    controller_db_src=$(active_controller_db_source)
+    controller_layout=$(active_controller_layout)
+    sentinel_path=$(active_controller_layout_sentinel)
+    echo "PMI_DIAG port_controller_layout=$controller_layout"
+    if [ -n "$sentinel_path" ]; then
+        echo "PMI_DIAG port_controller_layout_sentinel=$sentinel_path"
+    fi
+    echo "PMI_DIAG port_controller_db_source=$controller_db_src"
     if armhf_port_dir=$(launcher_armhf_port_dir "$source_script"); then
         seed_x86_runtime_libs "$armhf_port_dir"
     fi
@@ -1900,9 +1908,9 @@ launch_port_script() {
     start_power_lid_helper
     if launcher_requires_system_gl_stack "$source_script"; then
         echo "PMI_DIAG system_gl_stack_launcher=$source_script"
-        PMI_LD_LIBRARY_STRATEGY=system-gl bash "$script_to_run"
+        PMI_GAMECONTROLLERDB_FILE="$controller_db_src" SDL_GAMECONTROLLERCONFIG_FILE="$controller_db_src" PMI_LD_LIBRARY_STRATEGY=system-gl bash "$script_to_run"
     else
-        bash "$script_to_run"
+        PMI_GAMECONTROLLERDB_FILE="$controller_db_src" SDL_GAMECONTROLLERCONFIG_FILE="$controller_db_src" bash "$script_to_run"
     fi
     stop_power_lid_helper
 }

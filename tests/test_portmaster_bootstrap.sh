@@ -208,7 +208,7 @@ else
 fi
 export ESUDO=""
 export ESUDOKILL="-1"
-export SDL_GAMECONTROLLERCONFIG_FILE="\$controlfolder/gamecontrollerdb.txt"
+export SDL_GAMECONTROLLERCONFIG_FILE="\${PMI_GAMECONTROLLERDB_FILE:-\$controlfolder/gamecontrollerdb.txt}"
 get_controls() {
   LOWRES="N"
   ANALOGSTICKS="\${ANALOG_STICKS:-0}"
@@ -376,6 +376,8 @@ EOF
 	cat >"$real_ports_dir/TestPort.sh" <<EOF
 #!/usr/bin/env bash
 set -eu
+source "\$EMU_DIR/control.txt"
+printf '%s\n' "\$SDL_GAMECONTROLLERCONFIG_FILE" >"$temp_data_dir/controller_db_during.txt"
 if [ -n "\${PMI_JOY_TYPE_NODE:-}" ]; then
 	cat "\$PMI_JOY_TYPE_NODE" >"$temp_data_dir/joy_type_during.txt"
 fi
@@ -614,14 +616,19 @@ test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
 
 : >"$success_root/home/nintendo"
 PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
-grep -q 'PMI_DIAG overlay_controller_layout=nintendo' "$success_root/PORTS.txt"
-grep -q "PMI_DIAG overlay_controller_layout_sentinel=$success_root/home/nintendo" "$success_root/PORTS.txt"
-/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb_nintendo.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
+grep -q 'PMI_DIAG overlay_controller_layout=xbox' "$success_root/PORTS.txt"
+grep -q 'PMI_DIAG port_controller_layout=nintendo' "$success_root/PORTS.txt"
+grep -q "PMI_DIAG port_controller_layout_sentinel=$success_root/home/nintendo" "$success_root/PORTS.txt"
+grep -q "PMI_DIAG port_controller_db_source=$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb_nintendo.txt" "$success_root/PORTS.txt"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
+grep -qx "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb_nintendo.txt" "$success_root/.ports_temp/controller_db_during.txt"
 
 rm -f "$success_root/home/nintendo"
 PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
 grep -q 'PMI_DIAG overlay_controller_layout=xbox' "$success_root/PORTS.txt"
+grep -q 'PMI_DIAG port_controller_layout=xbox' "$success_root/PORTS.txt"
 /usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
+grep -qx "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb.txt" "$success_root/.ports_temp/controller_db_during.txt"
 
 sleep 1
 printf '# control refresh\n' >>"$success_root/Emus/my355/PORTS.pak/files/control.txt"

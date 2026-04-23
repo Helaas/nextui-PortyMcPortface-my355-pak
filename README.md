@@ -68,6 +68,7 @@ Porty McPortface defaults to the Spruce-style X360 button mapping for PortMaster
 
 - Open **Settings** from Porty McPortface to switch between `X360` and `Nintendo`.
 - The selected layout is applied automatically the next time you launch a port.
+- The PortMaster GUI itself always keeps the default X360 mapping; the Nintendo layout is only passed to launched ports.
 - Advanced/manual toggle: creating `/.userdata/my355/PORTS-portmaster/nintendo` enables Nintendo layout; deleting that file returns to X360.
 
 ## Updating
