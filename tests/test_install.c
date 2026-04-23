@@ -230,6 +230,8 @@ int main(void) {
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/pm-armhf-exec-wrapper", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/rsync", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/pm-power-lid-watch", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64", runtime_tools_dir);
@@ -302,6 +304,8 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/gamecontrollerdb.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/files/gamecontrollerdb_nintendo.txt", payload_dir);
+    assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/bin.tar.gz", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/lib.tar.gz", payload_dir);
@@ -333,6 +337,8 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-port-probe", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-armhf-exec-wrapper", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/rsync", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-power-lid-watch", payload_dir);
     assert(stat(file_path, &st) == 0);
@@ -417,6 +423,9 @@ int main(void) {
     assert(strstr(file_content, "echo \"PMI_DIAG overlay_sync_cached=$stamp_path\"") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$PM_RUNTIME_ROOT/autoinstall\"") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$XDG_DATA_HOME/PortMaster/autoinstall\"") != NULL);
+    assert(strstr(file_content, "active_controller_db_source()") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_layout=$controller_layout\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_db_source=$controller_db_src\"") != NULL);
     assert(strstr(file_content, "PMI_DIAG overlay_controller_db=$PM_RUNTIME_ROOT/gamecontrollerdb.txt") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/bin.tar.gz\" \"$PAK_DIR/bin\"") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/lib.tar.gz\" \"$PAK_DIR/lib\"") != NULL);

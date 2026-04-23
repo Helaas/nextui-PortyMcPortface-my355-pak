@@ -14,6 +14,8 @@ test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/pm
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/pm-sdl-compat-check"
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/pm-port-probe"
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/pm-armhf-exec-wrapper"
+test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/rsync"
+test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/rsync.txt"
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/box64"
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/aarch64/libSDL2-2.0.so.0"
 test -f "$tmpdir/Tools/my355/Porty McPortface.pak/resources/runtime-bin/my355/aarch64/pulse/libpulse-simple.so.0"

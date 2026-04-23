@@ -6,12 +6,13 @@ trap 'rm -rf "$root"' EXIT
 
 pak_dir="$root/Emus/my355/PORTS.pak"
 emu_dir="$pak_dir/PortMaster"
-xdg_data_home="$root/home/.local/share"
+home_root="$root/home"
+xdg_data_home="$home_root/.local/share"
 temp_data_dir="$root/.ports_temp"
 log_file="$root/PORTS.txt"
 helper_marker="$root/power-lid-helper.marker"
 
-mkdir -p "$pak_dir/files" "$emu_dir/pylibs/harbourmaster" "$emu_dir/miyoo" "$xdg_data_home/PortMaster" "$temp_data_dir"
+mkdir -p "$pak_dir/files" "$emu_dir/pylibs/harbourmaster" "$emu_dir/miyoo" "$home_root" "$xdg_data_home/PortMaster" "$temp_data_dir"
 cp payload/PORTS.pak/Portmaster.sh "$pak_dir/Portmaster.sh"
 mkdir -p "$pak_dir/bin" "$pak_dir/lib"
 printf '#!/bin/sh\nexit 0\n' >"$pak_dir/bin/runtime-helper"
@@ -60,6 +61,10 @@ cat >"$pak_dir/files/gamecontrollerdb.txt" <<'EOF'
 03000000de2800000112000001000000,Steam Controller,a:b0,b:b1,start:b7,platform:Linux,
 EOF
 
+cat >"$pak_dir/files/gamecontrollerdb_nintendo.txt" <<'EOF'
+03000000de2800000112000001000000,Steam Controller,a:b1,b:b0,start:b7,platform:Linux,
+EOF
+
 cp "$pak_dir/files/gamecontrollerdb.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
 touch -t 202001010000 "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
 
@@ -77,6 +82,7 @@ EMU_DIR="$emu_dir" \
 TEMP_DATA_DIR="$temp_data_dir" \
 XDG_DATA_HOME="$xdg_data_home" \
 PMI_LOG_FILE="$log_file" \
+HOME="$home_root" \
 PMI_TEST_MODE=overlay-sync \
 bash "$pak_dir/Portmaster.sh"
 
@@ -97,12 +103,42 @@ EMU_DIR="$emu_dir" \
 TEMP_DATA_DIR="$temp_data_dir" \
 XDG_DATA_HOME="$xdg_data_home" \
 PMI_LOG_FILE="$log_file" \
+HOME="$home_root" \
 PMI_TEST_MODE=overlay-sync \
 bash "$pak_dir/Portmaster.sh"
 
 second_hash="$(cksum "$emu_dir/control.txt" "$emu_dir/miyoo/control.txt" "$emu_dir/PortMaster.sh" "$emu_dir/miyoo/PortMaster.txt" "$emu_dir/gamecontrollerdb.txt" "$xdg_data_home/PortMaster/control.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt")"
 [ "$first_hash" = "$second_hash" ]
 [ ! -e "$helper_marker" ]
+
+: >"$home_root/nintendo"
+PAK_DIR="$pak_dir" \
+EMU_DIR="$emu_dir" \
+TEMP_DATA_DIR="$temp_data_dir" \
+XDG_DATA_HOME="$xdg_data_home" \
+PMI_LOG_FILE="$log_file" \
+HOME="$home_root" \
+PMI_TEST_MODE=overlay-sync \
+bash "$pak_dir/Portmaster.sh"
+
+cmp "$pak_dir/files/gamecontrollerdb_nintendo.txt" "$emu_dir/gamecontrollerdb.txt"
+cmp "$pak_dir/files/gamecontrollerdb_nintendo.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
+grep -q 'PMI_DIAG overlay_controller_layout=nintendo' "$log_file"
+grep -q "PMI_DIAG overlay_controller_layout_sentinel=$home_root/nintendo" "$log_file"
+
+rm -f "$home_root/nintendo"
+PAK_DIR="$pak_dir" \
+EMU_DIR="$emu_dir" \
+TEMP_DATA_DIR="$temp_data_dir" \
+XDG_DATA_HOME="$xdg_data_home" \
+PMI_LOG_FILE="$log_file" \
+HOME="$home_root" \
+PMI_TEST_MODE=overlay-sync \
+bash "$pak_dir/Portmaster.sh"
+
+cmp "$pak_dir/files/gamecontrollerdb.txt" "$emu_dir/gamecontrollerdb.txt"
+cmp "$pak_dir/files/gamecontrollerdb.txt" "$xdg_data_home/PortMaster/gamecontrollerdb.txt"
+grep -q 'PMI_DIAG overlay_controller_layout=xbox' "$log_file"
 
 CONTROL_FILE="$xdg_data_home/PortMaster/control.txt" \
 EXPECTED_CONTROL="$emu_dir" \

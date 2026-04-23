@@ -30,7 +30,7 @@ We still use the upstream TrimUI asset because the installer retargets it locall
 
 This repository also carries adapted assets from [ben16w/minui-portmaster](https://github.com/ben16w/minui-portmaster): `launch.sh`, `files/control.txt`, `files/config.json`, `files/ca-certificates.crt`, `files/bin.tar.gz`, and the base `files/lib.tar.gz` bundle.
 
-From [spruceUI/spruceOS](https://github.com/spruceUI/spruceOS) it uses `spruce/flip/miyoo355_rootfs_32.img_partaa`, `spruce/flip/miyoo355_rootfs_32.img_partab`, and `spruce/flip/miyoo355_rootfs_32.img_partac` at install time, plus the contents of `spruce/flip/lib/` when rebuilding the bundled runtime library archive.
+From [spruceUI/spruceOS](https://github.com/spruceUI/spruceOS) it uses `spruce/flip/miyoo355_rootfs_32.img_partaa`, `spruce/flip/miyoo355_rootfs_32.img_partab`, and `spruce/flip/miyoo355_rootfs_32.img_partac` at install time, plus the contents of `spruce/flip/lib/` when rebuilding the bundled runtime library archive. The bundled PortMaster controller database defaults to the Spruce X360 mapping, and the optional Nintendo layout uses Spruce's Nintendo mapping.
 
 ## Disclaimer
 
@@ -52,6 +52,7 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 ## Usage
 
 - From NextUI, launch **Porty McPortface** from **Tools** whenever you want to install, update, or reinstall the managed PortMaster runtime.
+- Press `Y` from Porty McPortface to open **Settings**, where you can choose the PortMaster runtime version and controller layout.
 - After installation, go to **Ports** and launch **Portmaster** to browse and install ports.
 - Installed ports will appear under the **Ports** section in NextUI.
 
@@ -61,13 +62,21 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 > [!TIP]
 > Not all ports are ready to run immediately after installation, and some still require files from a purchased copy of the game. Please refer to the port documentation on the [PortMaster](https://portmaster.games/games.html) website for setup instructions.
 
+## Controller Layout
+
+Porty McPortface defaults to the Spruce-style X360 button mapping for PortMaster ports.
+
+- Open **Settings** from Porty McPortface to switch between `X360` and `Nintendo`.
+- The selected layout is applied automatically the next time you launch a port.
+- Advanced/manual toggle: creating `/.userdata/my355/PORTS-portmaster/nintendo` enables Nintendo layout; deleting that file returns to X360.
+
 ## Updating
 
 The steps below update PortMaster while preserving your installed data and settings:
 
 1. Launch **Porty McPortface** from **Tools**.
 2. If a newer upstream TrimUI runtime is available, it will be shown on the main screen.
-3. Press `A` to update to the selected version, or `Y` to choose an older supported release first.
+3. Press `A` to update to the selected version, or press `Y` and choose an older supported release from **Settings** first.
 4. If you need to refresh the managed runtime without changing versions, press `X` to reinstall it.
 
 ## Power & Lid

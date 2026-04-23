@@ -4,6 +4,7 @@
 #include "apostrophe_widgets.h"
 
 #include "consent.h"
+#include "controller_layout.h"
 #include "http.h"
 #include "install.h"
 #include "json.h"
@@ -70,6 +71,7 @@ int main(void) {
     remote_metadata selected_remote = {0};
     install_state installed = {0};
     warning_consent consent = {0};
+    controller_layout current_controller_layout = CONTROLLER_LAYOUT_X360;
     status_model model;
     install_job job;
     ui_updater_choice updater_choice = UI_UPDATER_CANCEL;
@@ -131,6 +133,10 @@ int main(void) {
         memset(&consent, 0, sizeof(consent));
         ap_log("warning consent could not be loaded; treating as not accepted");
     }
+    if (load_controller_layout(&layout, &current_controller_layout) != 0) {
+        current_controller_layout = CONTROLLER_LAYOUT_X360;
+        ap_log("controller layout could not be loaded; defaulting to X360");
+    }
     for (;;) {
         model = resolve_status(installed, selected_remote, files_present);
         format_status_body(&model, &installed, &latest_remote, &selected_remote, selected_index != 0);
@@ -152,13 +158,19 @@ int main(void) {
                 return 0;
             }
 
-            if (decision == FLOW_DECISION_PICK_VERSION) {
-                int picker_index = selected_index;
+            if (decision == FLOW_DECISION_OPEN_SETTINGS) {
+                int settings_index = selected_index;
+                controller_layout settings_layout = current_controller_layout;
 
-                if (show_version_picker(releases, (int)release_count, selected_index, &picker_index) == AP_OK &&
-                        picker_index >= 0 && picker_index < (int)release_count) {
-                    selected_index = picker_index;
-                    selected_remote = releases[selected_index];
+                if (show_settings_screen(releases, (int)release_count, selected_index, current_controller_layout,
+                        &settings_index, &settings_layout) == AP_OK) {
+                    if (save_controller_layout(&layout, settings_layout) != 0) {
+                        show_message_box("Could not save controller layout.");
+                    } else if (settings_index >= 0 && settings_index < (int)release_count) {
+                        selected_index = settings_index;
+                        selected_remote = releases[selected_index];
+                        current_controller_layout = settings_layout;
+                    }
                 }
                 continue;
             }

@@ -11,7 +11,7 @@ int main(void) {
 
     model.action = ACTION_UPDATE;
     assert(decide_updater_flow(UI_UPDATER_CANCEL, &model, &consent) == FLOW_DECISION_EXIT);
-    assert(decide_updater_flow(UI_UPDATER_PICK_VERSION, &model, &consent) == FLOW_DECISION_PICK_VERSION);
+    assert(decide_updater_flow(UI_UPDATER_OPEN_SETTINGS, &model, &consent) == FLOW_DECISION_OPEN_SETTINGS);
 
     model.action = ACTION_NONE;
     assert(decide_updater_flow(UI_UPDATER_RUN, &model, &consent) == FLOW_DECISION_EXIT);

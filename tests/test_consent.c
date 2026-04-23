@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "../src/consent.h"
+#include "../src/userdata.h"
 
 static void join_path(char *buffer, size_t buffer_size, const char *root, const char *suffix) {
     snprintf(buffer, buffer_size, "%s/%s", root, suffix);
@@ -29,6 +30,9 @@ int main(void) {
 
     unsetenv("SHARED_USERDATA_PATH");
     unsetenv("USERDATA_PATH");
+    assert(portmaster_userdata_dir_for_layout(&layout, path, sizeof(path)) == 0);
+    snprintf(expected, sizeof(expected), "%s/.userdata/my355/PORTS-portmaster", root);
+    assert(strcmp(path, expected) == 0);
     assert(consent_path_for_layout(&layout, path, sizeof(path)) == 0);
     snprintf(expected, sizeof(expected), "%s/.userdata/my355/PORTS-portmaster/warning-consent.json", root);
     assert(strcmp(path, expected) == 0);
@@ -39,12 +43,18 @@ int main(void) {
 
     join_path(userdata_root, sizeof(userdata_root), root, "userdata-local");
     assert(setenv("USERDATA_PATH", userdata_root, 1) == 0);
+    assert(portmaster_userdata_dir_for_layout(&layout, path, sizeof(path)) == 0);
+    snprintf(expected, sizeof(expected), "%s/PORTS-portmaster", userdata_root);
+    assert(strcmp(path, expected) == 0);
     assert(consent_path_for_layout(&layout, path, sizeof(path)) == 0);
     snprintf(expected, sizeof(expected), "%s/PORTS-portmaster/warning-consent.json", userdata_root);
     assert(strcmp(path, expected) == 0);
 
     join_path(shared_root, sizeof(shared_root), root, "userdata-shared");
     assert(setenv("SHARED_USERDATA_PATH", shared_root, 1) == 0);
+    assert(portmaster_userdata_dir_for_layout(&layout, path, sizeof(path)) == 0);
+    snprintf(expected, sizeof(expected), "%s/PORTS-portmaster", shared_root);
+    assert(strcmp(path, expected) == 0);
     assert(consent_path_for_layout(&layout, path, sizeof(path)) == 0);
     snprintf(expected, sizeof(expected), "%s/PORTS-portmaster/warning-consent.json", shared_root);
     assert(strcmp(path, expected) == 0);

@@ -64,6 +64,13 @@ $(RUNTIME_HELPERS_STAMP): tools/pm-artwork-convert.c tools/pm-sdl-compat-check.c
 		sh -lc 'aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -I/workspace/third_party/stb -o /workspace/build/runtime-bin/pm-artwork-convert /workspace/tools/pm-artwork-convert.c -lm && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-artwork-convert && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-sdl-compat-check /workspace/tools/pm-sdl-compat-check.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-sdl-compat-check && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-port-probe /workspace/tools/pm-port-probe.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-port-probe && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-power-lid-watch /workspace/tools/pm-power-lid-watch.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-power-lid-watch && aarch64-nextui-linux-gnu-gcc -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -o /workspace/build/runtime-bin/pm-armhf-exec-wrapper /workspace/tools/pm-armhf-exec-wrapper.c && aarch64-nextui-linux-gnu-strip /workspace/build/runtime-bin/pm-armhf-exec-wrapper'
 	@touch $@
 
+$(RUNTIME_BIN_DIR)/rsync: third_party/rsync/my355/rsync | $(RUNTIME_BIN_DIR)
+	cp third_party/rsync/my355/rsync "$@"
+	chmod +x "$@"
+
+$(RUNTIME_BIN_DIR)/rsync.txt: third_party/rsync/my355/rsync.txt | $(RUNTIME_BIN_DIR)
+	cp third_party/rsync/my355/rsync.txt "$@"
+
 $(RUNTIME_BIN_DIR)/box64: scripts/build-box64-from-source.sh | $(RUNTIME_BIN_DIR) $(RUNTIME_CACHE_DIR)
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
@@ -87,7 +94,7 @@ $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse.so.0: third_party/pulse/my355/libpulse
 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulsecommon-13.99.so: third_party/pulse/my355/libpulsecommon-13.99.so | $(RUNTIME_BIN_DIR)/aarch64/pulse
 	cp third_party/pulse/my355/libpulsecommon-13.99.so "$@"
 
-$(RUNTIME_STAMP): $(RUNTIME_HELPERS_STAMP) $(RUNTIME_BIN_DIR)/box64 $(RUNTIME_BOX64_LIBS_STAMP) $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse-simple.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulsecommon-13.99.so
+$(RUNTIME_STAMP): $(RUNTIME_HELPERS_STAMP) $(RUNTIME_BIN_DIR)/rsync $(RUNTIME_BIN_DIR)/rsync.txt $(RUNTIME_BIN_DIR)/box64 $(RUNTIME_BOX64_LIBS_STAMP) $(RUNTIME_BIN_DIR)/aarch64/libSDL2-2.0.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse-simple.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulse.so.0 $(RUNTIME_BIN_DIR)/aarch64/pulse/libpulsecommon-13.99.so
 	@touch $@
 
 build/my355/runtime-bin/.stamp: $(RUNTIME_STAMP)
@@ -109,8 +116,10 @@ test-native:
 	./$(BUILD_DIR)/tests/test_json
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_status.c src/status.c -o $(BUILD_DIR)/tests/test_status
 	./$(BUILD_DIR)/tests/test_status
-	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_consent.c src/consent.c src/fs.c -o $(BUILD_DIR)/tests/test_consent
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_consent.c src/consent.c src/userdata.c src/fs.c -o $(BUILD_DIR)/tests/test_consent
 	./$(BUILD_DIR)/tests/test_consent
+	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_controller_layout.c src/controller_layout.c src/userdata.c src/fs.c -o $(BUILD_DIR)/tests/test_controller_layout
+	./$(BUILD_DIR)/tests/test_controller_layout
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_updater_flow.c src/updater_flow.c -o $(BUILD_DIR)/tests/test_updater_flow
 	./$(BUILD_DIR)/tests/test_updater_flow
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_install.c src/install.c src/fs.c src/http.c src/json.c src/process.c -o $(BUILD_DIR)/tests/test_install

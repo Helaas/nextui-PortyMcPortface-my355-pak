@@ -6,12 +6,13 @@ create_common_tree() {
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
 	shim_bin="$root/test-bin"
-	xdg_data_home="$root/home/.local/share"
+	home_root="$root/home"
+	xdg_data_home="$home_root/.local/share"
 	temp_data_dir="$root/.ports_temp"
 	log_file="$root/PORTS.txt"
 
 	mkdir -p "$pak_dir/files" "$pak_dir/bin" "$pak_dir/lib" "$emu_dir/pylibs/harbourmaster" \
-		"$emu_dir/miyoo" "$xdg_data_home/PortMaster" "$temp_data_dir" "$shim_bin"
+		"$emu_dir/miyoo" "$home_root" "$xdg_data_home/PortMaster" "$temp_data_dir" "$shim_bin"
 	cp payload/PORTS.pak/Portmaster.sh "$pak_dir/Portmaster.sh"
 	printf '#!/bin/sh\nexit 0\n' >"$pak_dir/bin/python3"
 	chmod +x "$pak_dir/bin/python3"
@@ -235,6 +236,10 @@ EOF
 03000000de2800000112000001000000,Steam Controller,a:b0,b:b1,start:b7,platform:Linux,
 EOF
 
+	cat >"$pak_dir/files/gamecontrollerdb_nintendo.txt" <<'EOF'
+03000000de2800000112000001000000,Steam Controller,a:b1,b:b0,start:b7,platform:Linux,
+EOF
+
 	cat >"$emu_dir/device_info.txt" <<'EOF'
 ANALOG_STICKS=2
 DEVICE_ARCH=aarch64
@@ -259,8 +264,80 @@ run_overlay_sync() {
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
+	HOME="$home_root" \
 	PATH="$shim_bin:$PATH" \
 	PMI_TEST_MODE=overlay-sync \
+	bash "$pak_dir/Portmaster.sh"
+}
+
+create_gui_sync_tree() {
+	root="$1"
+	pak_dir="$root/Emus/my355/PORTS.pak"
+	emu_dir="$pak_dir/PortMaster"
+	rom_dir="$root/Roms/Ports (PORTS)"
+	real_ports_dir="$rom_dir/.ports"
+	port_dir="$real_ports_dir/am2r"
+
+	create_common_tree "$root"
+	write_success_lib_bundle "$root"
+	mkdir -p "$rom_dir/.media" "$real_ports_dir" "$port_dir"
+
+	cat >"$emu_dir/pugwash" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+	chmod +x "$emu_dir/pugwash"
+
+	cat >"$rom_dir/0) Portmaster.sh" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+	chmod +x "$rom_dir/0) Portmaster.sh"
+
+	cat >"$rom_dir/Custom.sh" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+	chmod +x "$rom_dir/Custom.sh"
+	printf 'custom-media\n' >"$rom_dir/.media/Custom.png"
+
+	cat >"$real_ports_dir/AM2R.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+exit 0
+EOF
+	chmod +x "$real_ports_dir/AM2R.sh"
+
+	cat >"$port_dir/port.json" <<'EOF'
+{
+  "files": {
+    "AM2R.sh": "AM2R.sh",
+    "am2r/": "am2r/"
+  }
+}
+EOF
+	printf 'am2r-cover\n' >"$port_dir/cover.png"
+	printf 'cache\n' >"$rom_dir/Ports_cache7.db"
+}
+
+run_gui_sync() {
+	root="$1"
+	pak_dir="$root/Emus/my355/PORTS.pak"
+	emu_dir="$pak_dir/PortMaster"
+	shim_bin="$root/test-bin"
+	xdg_data_home="$root/home/.local/share"
+	temp_data_dir="$root/.ports_temp"
+	log_file="$root/PORTS.txt"
+	rom_dir="$root/Roms/Ports (PORTS)"
+
+	env \
+	PAK_DIR="$pak_dir" \
+	EMU_DIR="$emu_dir" \
+	ROM_PATH="$rom_dir/0) Portmaster.sh" \
+	TEMP_DATA_DIR="$temp_data_dir" \
+	XDG_DATA_HOME="$xdg_data_home" \
+	PMI_LOG_FILE="$log_file" \
+	PATH="$shim_bin:$PATH" \
 	bash "$pak_dir/Portmaster.sh"
 }
 
@@ -331,7 +408,8 @@ run_direct_launch_for_script() {
 	pak_dir="$root/Emus/my355/PORTS.pak"
 	emu_dir="$pak_dir/PortMaster"
 	shim_bin="$root/test-bin"
-	xdg_data_home="$root/home/.local/share"
+	home_root="$root/home"
+	xdg_data_home="$home_root/.local/share"
 	temp_data_dir="$root/.ports_temp"
 	log_file="$root/PORTS.txt"
 	rom_dir="$root/Roms/Ports (PORTS)"
@@ -349,6 +427,7 @@ run_direct_launch_for_script() {
 	TEMP_DATA_DIR="$temp_data_dir" \
 	XDG_DATA_HOME="$xdg_data_home" \
 	PMI_LOG_FILE="$log_file" \
+	HOME="$home_root" \
 	PATH="$shim_bin:$PATH" \
 	bash "$pak_dir/Portmaster.sh"
 }
@@ -474,7 +553,8 @@ aarch64_skip_root="$(mktemp -d)"
 native_gl_root="$(mktemp -d)"
 bundled_gl_root="$(mktemp -d)"
 multi_port_root="$(mktemp -d)"
-trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root" "$multi_port_root"' EXIT
+gui_cleanup_root="$(mktemp -d)"
+trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root" "$multi_port_root" "$gui_cleanup_root"' EXIT
 
 create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
@@ -530,6 +610,18 @@ grep -q "PMI_DIAG overlay_sync_cached=$success_root/Emus/my355/PORTS.pak/PortMas
 grep -q "PMI_DIAG global_port_repairs_cached=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
 grep -q "PMI_DIAG staged_launch_reused=$success_staged" "$success_root/PORTS.txt"
 test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
+
+: >"$success_root/home/nintendo"
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
+grep -q 'PMI_DIAG overlay_controller_layout=nintendo' "$success_root/PORTS.txt"
+grep -q "PMI_DIAG overlay_controller_layout_sentinel=$success_root/home/nintendo" "$success_root/PORTS.txt"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb_nintendo.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
+
+rm -f "$success_root/home/nintendo"
+PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$success_root"
+grep -q 'PMI_DIAG overlay_controller_layout=xbox' "$success_root/PORTS.txt"
+/usr/bin/cmp -s "$success_root/Emus/my355/PORTS.pak/files/gamecontrollerdb.txt" "$success_root/Emus/my355/PORTS.pak/PortMaster/gamecontrollerdb.txt"
 
 sleep 1
 printf '# control refresh\n' >>"$success_root/Emus/my355/PORTS.pak/files/control.txt"
@@ -545,6 +637,31 @@ PMI_TEST_PORT_PROBE_LOG="$success_root/port-probe.log" run_direct_launch "$succe
 grep -q "PMI_DIAG global_port_repairs_refresh=$success_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$success_root/PORTS.txt"
 grep -q "PMI_DIAG staged_launch_refreshed=$success_staged" "$success_root/PORTS.txt"
 test "$(wc -l < "$success_root/port-probe.log" | tr -d ' ')" = "1"
+
+create_gui_sync_tree "$gui_cleanup_root"
+run_gui_sync "$gui_cleanup_root"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/AM2R.sh"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/.media/AM2R.png"
+grep -q '^# PMI_PORTMASTER_LAUNCHER_WRAPPER=1$' "$gui_cleanup_root/Roms/Ports (PORTS)/AM2R.sh"
+grep -q 'AM2R.sh' "$gui_cleanup_root/Roms/Ports (PORTS)/.ports/.pmi-launch-index-v1.tsv"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/Custom.sh"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/.media/Custom.png"
+test ! -f "$gui_cleanup_root/Roms/Ports (PORTS)/Ports_cache7.db"
+
+rm -rf "$gui_cleanup_root/Roms/Ports (PORTS)/.ports/am2r"
+rm -f "$gui_cleanup_root/Roms/Ports (PORTS)/.ports/AM2R.sh"
+	printf 'cache\n' >"$gui_cleanup_root/Roms/Ports (PORTS)/Ports_cache7.db"
+run_gui_sync "$gui_cleanup_root"
+test ! -f "$gui_cleanup_root/Roms/Ports (PORTS)/AM2R.sh"
+test ! -f "$gui_cleanup_root/Roms/Ports (PORTS)/.media/AM2R.png"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/Custom.sh"
+test -f "$gui_cleanup_root/Roms/Ports (PORTS)/.media/Custom.png"
+test ! -f "$gui_cleanup_root/Roms/Ports (PORTS)/Ports_cache7.db"
+! grep -q 'AM2R' "$gui_cleanup_root/Roms/Ports (PORTS)/.ports/.pmi-launch-index-v1.tsv"
+grep -q "PMI_DIAG launcher_index_refresh=$gui_cleanup_root/Roms/Ports (PORTS)/.ports/.pmi-launch-index-v1.tsv" "$gui_cleanup_root/PORTS.txt"
+grep -q "PMI_DIAG global_port_repairs_refresh=$gui_cleanup_root/Roms/Ports (PORTS)/.ports/.pmi-global-repairs-v1.stamp" "$gui_cleanup_root/PORTS.txt"
+grep -q "PMI_DIAG stale_wrapper_removed=$gui_cleanup_root/Roms/Ports (PORTS)/AM2R.sh" "$gui_cleanup_root/PORTS.txt"
+grep -q "PMI_DIAG stale_artwork_removed=$gui_cleanup_root/Roms/Ports (PORTS)/.media/AM2R.png" "$gui_cleanup_root/PORTS.txt"
 
 create_direct_launch_tree "$joy_override_root"
 printf '0 [-1=none 0=miyoo 1=xbox]\n' >"$joy_override_root/joy_type"

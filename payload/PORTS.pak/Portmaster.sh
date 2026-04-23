@@ -223,6 +223,57 @@ touch_stamp_file() {
     : >"$stamp_path"
 }
 
+controller_layout_root() {
+    if [ -n "${PMI_HOME_ROOT:-}" ]; then
+        printf '%s\n' "$PMI_HOME_ROOT"
+    elif [ -n "${HOME:-}" ]; then
+        printf '%s\n' "$HOME"
+    else
+        printf '%s\n' "$PM_RUNTIME_ROOT"
+    fi
+}
+
+active_controller_layout_sentinel() {
+    local sentinel_root
+
+    sentinel_root=$(controller_layout_root)
+    [ -d "$sentinel_root" ] || return 0
+    find "$sentinel_root" -maxdepth 1 -type f -iname 'nintendo*' | head -n 1
+}
+
+requested_controller_layout() {
+    local sentinel_path
+
+    sentinel_path=$(active_controller_layout_sentinel)
+    if [ -n "$sentinel_path" ]; then
+        printf 'nintendo\n'
+    else
+        printf 'xbox\n'
+    fi
+}
+
+active_controller_db_source() {
+    local requested_layout
+
+    requested_layout=$(requested_controller_layout)
+    if [ "$requested_layout" = "nintendo" ] && [ -f "$PAK_DIR/files/gamecontrollerdb_nintendo.txt" ]; then
+        printf '%s/files/gamecontrollerdb_nintendo.txt\n' "$PAK_DIR"
+    else
+        printf '%s/files/gamecontrollerdb.txt\n' "$PAK_DIR"
+    fi
+}
+
+active_controller_layout() {
+    case "$(active_controller_db_source)" in
+        */gamecontrollerdb_nintendo.txt)
+            printf 'nintendo\n'
+            ;;
+        *)
+            printf 'xbox\n'
+            ;;
+    esac
+}
+
 ensure_exec_file() {
     local file_path="$1"
 
@@ -278,8 +329,10 @@ overlay_file_is_stale() {
 
 runtime_overlay_is_stale() {
     local xdg_pm_dir="$1"
+    local controller_db_src
     local stamp_path
 
+    controller_db_src=$(active_controller_db_source)
     stamp_path=$(overlay_sync_stamp_path)
     [ -f "$stamp_path" ] || return 0
 
@@ -289,9 +342,9 @@ runtime_overlay_is_stale() {
     overlay_file_is_stale "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.sh" "$stamp_path" && return 0
     overlay_file_is_stale "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt" "$stamp_path" && return 0
     overlay_file_is_stale "$PAK_DIR/files/config.py" "$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py" "$stamp_path" && return 0
-    overlay_file_is_stale "$PAK_DIR/files/gamecontrollerdb.txt" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$controller_db_src" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt" "$stamp_path" && return 0
     overlay_file_is_stale "$PAK_DIR/files/control.txt" "$xdg_pm_dir/control.txt" "$stamp_path" && return 0
-    overlay_file_is_stale "$PAK_DIR/files/gamecontrollerdb.txt" "$xdg_pm_dir/gamecontrollerdb.txt" "$stamp_path" && return 0
+    overlay_file_is_stale "$controller_db_src" "$xdg_pm_dir/gamecontrollerdb.txt" "$stamp_path" && return 0
 
     [ -x "$PM_RUNTIME_ROOT/PortMaster.txt" ] || return 0
     [ -x "$PM_RUNTIME_ROOT/PortMaster.sh" ] || return 0
@@ -301,9 +354,15 @@ runtime_overlay_is_stale() {
 
 ensure_runtime_parity_overlay() {
     local xdg_pm_dir="$XDG_DATA_HOME/PortMaster"
+    local controller_db_src
+    local controller_layout
+    local sentinel_path
     local stamp_path
 
     mkdir -p "$xdg_pm_dir"
+    controller_db_src=$(active_controller_db_source)
+    controller_layout=$(active_controller_layout)
+    sentinel_path=$(active_controller_layout_sentinel)
     stamp_path=$(overlay_sync_stamp_path)
     if runtime_overlay_is_stale "$xdg_pm_dir"; then
         sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$PM_RUNTIME_ROOT/control.txt"
@@ -312,9 +371,9 @@ ensure_runtime_parity_overlay() {
         sync_overlay_file_if_needed "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/PortMaster.sh"
         sync_overlay_file_if_needed "$PAK_DIR/files/PortMaster.txt" "$PM_RUNTIME_ROOT/miyoo/PortMaster.txt"
         sync_overlay_file_if_needed "$PAK_DIR/files/config.py" "$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py"
-        sync_overlay_file_if_needed "$PAK_DIR/files/gamecontrollerdb.txt" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
+        sync_overlay_file_if_needed "$controller_db_src" "$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
         sync_overlay_file_if_needed "$PAK_DIR/files/control.txt" "$xdg_pm_dir/control.txt"
-        sync_overlay_file_if_needed "$PAK_DIR/files/gamecontrollerdb.txt" "$xdg_pm_dir/gamecontrollerdb.txt"
+        sync_overlay_file_if_needed "$controller_db_src" "$xdg_pm_dir/gamecontrollerdb.txt"
         touch_stamp_file "$stamp_path"
         echo "PMI_DIAG overlay_sync_refresh=$stamp_path"
     else
@@ -326,6 +385,11 @@ ensure_runtime_parity_overlay() {
 
     echo "PMI_DIAG overlay_runtime_root=$PM_RUNTIME_ROOT"
     echo "PMI_DIAG overlay_xdg_root=$xdg_pm_dir"
+    echo "PMI_DIAG overlay_controller_layout=$controller_layout"
+    if [ -n "$sentinel_path" ]; then
+        echo "PMI_DIAG overlay_controller_layout_sentinel=$sentinel_path"
+    fi
+    echo "PMI_DIAG overlay_controller_db_source=$controller_db_src"
     echo "PMI_DIAG overlay_controller_db=$PM_RUNTIME_ROOT/gamecontrollerdb.txt"
 }
 
@@ -628,6 +692,13 @@ refresh_launcher_index() {
 launcher_index_is_stale() {
     local index_path="$1"
     local launcher_path
+    local entry_path
+    local entry_port_dir
+    local entry_armhf
+    local entry_aarch64
+    local entry_needs_flip_libmali
+    local index_count=0
+    local launcher_count=0
 
     [ -f "$index_path" ] || return 0
     if [ "$PAK_DIR/Portmaster.sh" -nt "$index_path" ]; then
@@ -640,6 +711,22 @@ launcher_index_is_stale() {
         fi
     done
     if find "$REAL_PORTS_DIR" -mindepth 2 -maxdepth 2 -type f -name 'port.json' -newer "$index_path" | grep -q .; then
+        return 0
+    fi
+    while IFS="$(printf '\t')" read -r entry_path entry_port_dir entry_armhf entry_aarch64 entry_needs_flip_libmali || [ -n "${entry_path:-}" ]; do
+        [ -n "${entry_path:-}" ] || continue
+        index_count=$((index_count + 1))
+        [ -f "$entry_path" ] || return 0
+        if [ -n "${entry_port_dir:-}" ]; then
+            [ -d "$entry_port_dir" ] || return 0
+            [ -f "$entry_port_dir/port.json" ] || return 0
+        fi
+    done < "$index_path"
+    for launcher_path in "$REAL_PORTS_DIR"/*.sh; do
+        [ -f "$launcher_path" ] || continue
+        launcher_count=$((launcher_count + 1))
+    done
+    if [ "$index_count" -ne "$launcher_count" ]; then
         return 0
     fi
     return 1
@@ -1640,10 +1727,40 @@ write_game_wrapper() {
 #!/bin/sh
 set -eu
 
+# PMI_PORTMASTER_LAUNCHER_WRAPPER=1
 export PMI_PORT_SCRIPT="$target_script"
 exec "$PAK_DIR/launch.sh" "$wrapper_path"
 EOF
     chmod +x "$wrapper_path" 2>/dev/null || true
+}
+
+managed_game_wrapper_source() {
+    local wrapper_path="$1"
+    local source_script
+
+    [ -f "$wrapper_path" ] || return 1
+    source_script=$(sed -n 's|^export PMI_PORT_SCRIPT="\(.*\)"$|\1|p' "$wrapper_path" | head -n 1)
+    [ -n "$source_script" ] || return 1
+    grep -q 'launch\.sh' "$wrapper_path" 2>/dev/null || return 1
+    printf '%s\n' "$source_script"
+}
+
+prune_stale_game_wrappers() {
+    local wrapper_path
+    local source_script
+
+    [ -d "$ROM_DIR" ] || return 0
+    for wrapper_path in "$ROM_DIR"/*.sh; do
+        [ -f "$wrapper_path" ] || continue
+        if ! source_script=$(managed_game_wrapper_source "$wrapper_path"); then
+            continue
+        fi
+        if [ -f "$source_script" ]; then
+            continue
+        fi
+        rm -f "$wrapper_path"
+        echo "PMI_DIAG stale_wrapper_removed=$wrapper_path"
+    done
 }
 
 copy_game_scripts() {
@@ -1710,6 +1827,24 @@ copy_artwork_to_media() {
     done
 }
 
+prune_stale_artwork_to_media() {
+    local media_file
+    local wrapper_base
+    local wrapper_path
+
+    [ -d "$ROM_DIR/.media" ] || return 0
+    for media_file in "$ROM_DIR/.media"/*.png; do
+        [ -f "$media_file" ] || continue
+        wrapper_base=$(basename "${media_file%.*}")
+        wrapper_path="$ROM_DIR/$wrapper_base.sh"
+        if [ -f "$wrapper_path" ]; then
+            continue
+        fi
+        rm -f "$media_file"
+        echo "PMI_DIAG stale_artwork_removed=$media_file"
+    done
+}
+
 clear_ports_cache() {
     rm -f "$ROM_DIR/PORTS_cache7.db" "$ROM_DIR/Ports_cache7.db" 2>/dev/null || true
 }
@@ -1717,7 +1852,9 @@ clear_ports_cache() {
 post_gui_rewrites() {
     process_squashfs_files "$REAL_PORTS_DIR"
     ensure_global_port_repairs
+    prune_stale_game_wrappers
     copy_game_scripts
+    prune_stale_artwork_to_media
     copy_artwork_to_media
     clear_ports_cache
 }

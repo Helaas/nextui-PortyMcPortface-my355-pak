@@ -394,6 +394,12 @@ static int copy_payload_compatibility_files(const install_layout *layout) {
     if (copy_file(src, dst) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/files/gamecontrollerdb_nintendo.txt", layout->payload_template_dir);
+    snprintf(dst, sizeof(dst), "%s/files/gamecontrollerdb_nintendo.txt", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/files/gamecontrollerdb.txt", layout->payload_template_dir);
     snprintf(dst, sizeof(dst), "%s/PortMaster/gamecontrollerdb.txt", layout->payload_pak_dir);
     if (copy_file(src, dst) != 0)
         return -1;
@@ -503,6 +509,16 @@ static int install_runtime_support_tools(const install_layout *layout) {
         return -1;
 
     snprintf(dst, sizeof(dst), "%s/bin/pm-armhf-exec-wrapper", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/rsync", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/rsync", layout->payload_pak_dir);
     if (copy_file(src, dst) != 0)
         return -1;
     if (chmod(dst, 0755) != 0)
