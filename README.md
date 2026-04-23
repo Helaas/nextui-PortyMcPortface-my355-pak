@@ -47,14 +47,32 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 5. Restart your device. NextUI will automatically detect and install the new pak.
 6. Open **Tools** and launch **Porty McPortface**.
 7. Read and accept the unsupported-integration warning.
-8. Press `A` to install the selected PortMaster runtime.
+8. Press `A RUN` to install the selected PortMaster runtime.
 
 ## Usage
 
 - From NextUI, launch **Porty McPortface** from **Tools** whenever you want to install, update, or reinstall the managed PortMaster runtime.
-- Press `Y` from Porty McPortface to open **Settings**, where you can choose the PortMaster runtime version and controller layout.
+- Press `Y SETTINGS` from Porty McPortface to choose the PortMaster runtime version and controller layout.
 - After installation, go to **Ports** and launch **Portmaster** to browse and install ports.
 - Installed ports will appear under the **Ports** section in NextUI.
+
+## Porty Controls
+
+Main screen:
+
+- `A RUN` installs or updates the selected PortMaster runtime when work is available.
+- `X REINSTALL` refreshes the managed runtime without changing the selected version.
+- `Y SETTINGS` opens the on-device settings screen.
+- `B QUIT` exits Porty McPortface. When the installed runtime is already current, there is no `A CLOSE`; use `B QUIT`.
+
+Settings screen:
+
+- `UP/DOWN` changes the focused setting row.
+- `LEFT/RIGHT` changes the focused setting value.
+- `PortMaster Version` cycles through available releases directly on the settings screen.
+- `Controller Layout` switches between `X360` and `Nintendo`.
+- `START SAVE` commits both staged settings.
+- `B BACK` exits Settings without saving staged changes.
 
 > [!WARNING]
 > The first time you launch **Portmaster** from the **Ports** section in NextUI, it can take up to a minute to start. Please wait for the initial setup to finish before assuming it has stalled.
@@ -77,7 +95,7 @@ The steps below update PortMaster while preserving your installed data and setti
 
 1. Launch **Porty McPortface** from **Tools**.
 2. If a newer upstream TrimUI runtime is available, it will be shown on the main screen.
-3. Press `A` to update to the selected version, or press `Y` and choose an older supported release from **Settings** first.
+3. Press `A RUN` to update to the selected version, or press `Y SETTINGS` and cycle the **PortMaster Version** row to an older supported release first.
 4. If you need to refresh the managed runtime without changing versions, press `X` to reinstall it.
 
 ## Power & Lid
