@@ -1,11 +1,15 @@
 {
   "name": "Porty McPortface - Miyoo Flip (my355)",
-  "version": "v0.1.0",
+  "version": "v0.2.0",
   "type": "TOOL",
   "description": "Tool to manage a NextUI PortMaster runtime installation on device.",
   "author": "helaas",
   "repo_url": "https://github.com/Helaas/nextui-PortyMcPortface-my355-pak",
   "release_filename": "Porty-McPortface.pakz",
+  "changelog": {
+    "v0.2.0": "Adds native compatibility helpers, runtime launch probing, controller layout settings, power/lid handling, and per-port fixes.",
+    "v0.1.0": "Initial release."
+  },
   "platforms": [
     "my355"
   ]

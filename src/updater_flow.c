@@ -4,8 +4,8 @@ updater_flow_decision decide_updater_flow(
     ui_updater_choice choice,
     const status_model *model,
     const warning_consent *consent) {
-    if (choice == UI_UPDATER_PICK_VERSION)
-        return FLOW_DECISION_PICK_VERSION;
+    if (choice == UI_UPDATER_OPEN_SETTINGS)
+        return FLOW_DECISION_OPEN_SETTINGS;
 
     if (choice == UI_UPDATER_CANCEL)
         return FLOW_DECISION_EXIT;

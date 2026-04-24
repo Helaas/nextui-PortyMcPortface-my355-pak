@@ -10,6 +10,7 @@ Porty McPortface is a standalone tool pak for [NextUI](https://github.com/LoveRe
 - Install and update PortMaster from a single NextUI tool pak.
 - Distributed as a single `.pakz`, with no additional software required on the device.
 - Rewrites the installed runtime for NextUI launchers and artwork support.
+- Adds NextUI-style power button and lid-close suspend handling for `my355` ports and the PortMaster GUI.
 - Bundles `box64` support and downloads the Spruce ARMHF rootfs needed by supported 32-bit x86 ports.
 
 ## Supported Platforms
@@ -29,7 +30,7 @@ We still use the upstream TrimUI asset because the installer retargets it locall
 
 This repository also carries adapted assets from [ben16w/minui-portmaster](https://github.com/ben16w/minui-portmaster): `launch.sh`, `files/control.txt`, `files/config.json`, `files/ca-certificates.crt`, `files/bin.tar.gz`, and the base `files/lib.tar.gz` bundle.
 
-From [spruceUI/spruceOS](https://github.com/spruceUI/spruceOS) it uses `spruce/flip/miyoo355_rootfs_32.img_partaa`, `spruce/flip/miyoo355_rootfs_32.img_partab`, and `spruce/flip/miyoo355_rootfs_32.img_partac` at install time, plus the contents of `spruce/flip/lib/` when rebuilding the bundled runtime library archive.
+From [spruceUI/spruceOS](https://github.com/spruceUI/spruceOS) it uses `spruce/flip/miyoo355_rootfs_32.img_partaa`, `spruce/flip/miyoo355_rootfs_32.img_partab`, and `spruce/flip/miyoo355_rootfs_32.img_partac` at install time, plus the contents of `spruce/flip/lib/` when rebuilding the bundled runtime library archive. The bundled PortMaster controller database defaults to the Spruce X360 mapping, and the optional Nintendo layout uses Spruce's Nintendo mapping.
 
 ## Disclaimer
 
@@ -46,13 +47,33 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 5. Restart your device. NextUI will automatically detect and install the new pak.
 6. Open **Tools** and launch **Porty McPortface**.
 7. Read and accept the unsupported-integration warning.
-8. Press `A` to install the selected PortMaster runtime.
+8. Press `A RUN` to install the selected PortMaster runtime.
 
 ## Usage
 
 - From NextUI, launch **Porty McPortface** from **Tools** whenever you want to install, update, or reinstall the managed PortMaster runtime.
+- Press `Y SETTINGS` from Porty McPortface to choose the PortMaster runtime version and controller layout.
 - After installation, go to **Ports** and launch **Portmaster** to browse and install ports.
 - Installed ports will appear under the **Ports** section in NextUI.
+
+## Porty Controls
+
+Main screen:
+
+- `X REINSTALL` refreshes the managed runtime without changing the selected version.
+- `Y SETTINGS` opens the on-device settings screen.
+- `A RUN` installs or updates the selected PortMaster runtime when work is available.
+- `B QUIT` exits Porty McPortface. When the installed runtime is already current, there is no `A CLOSE`; use `B QUIT`.
+
+Settings screen:
+
+- `UP/DOWN` changes the focused setting row.
+- `LEFT/RIGHT` changes the focused setting value.
+- `PortMaster Version` cycles through available releases directly on the settings screen.
+- `Global Controller Layout` switches between `X360` and `Nintendo`.
+- `A OPEN` on **Port Layouts** opens the per-port layout screen.
+- `START SAVE` commits staged settings on the current screen.
+- `B BACK` exits Settings without saving staged changes.
 
 > [!WARNING]
 > The first time you launch **Portmaster** from the **Ports** section in NextUI, it can take up to a minute to start. Please wait for the initial setup to finish before assuming it has stalled.
@@ -60,14 +81,36 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 > [!TIP]
 > Not all ports are ready to run immediately after installation, and some still require files from a purchased copy of the game. Please refer to the port documentation on the [PortMaster](https://portmaster.games/games.html) website for setup instructions.
 
+## Controller Layout
+
+Porty McPortface defaults to the Spruce-style X360 button mapping for PortMaster ports.
+
+- Open **Settings** from Porty McPortface and use **Global Controller Layout** to switch the default between `X360` and `Nintendo`.
+- Use **Port Layouts** to set an installed port to `Follow Global`, `X360`, or `Nintendo`.
+- The selected global or per-port layout is applied automatically the next time you launch a port.
+- The PortMaster GUI itself always keeps the default X360 mapping; the Nintendo layout is only passed to launched ports.
+- Advanced/manual global toggle: creating `/.userdata/my355/PORTS-portmaster/nintendo` enables Nintendo layout; deleting that file returns to X360.
+- Advanced/manual per-port override: write `x360` or `nintendo` to `/.userdata/my355/PORTS-portmaster/controller-layouts/<launcher>.layout`, where `<launcher>` is the installed `.ports` launcher filename such as `AM2R.sh`. Delete the file to return that port to `Follow Global`.
+
 ## Updating
 
 The steps below update PortMaster while preserving your installed data and settings:
 
 1. Launch **Porty McPortface** from **Tools**.
 2. If a newer upstream TrimUI runtime is available, it will be shown on the main screen.
-3. Press `A` to update to the selected version, or `Y` to choose an older supported release first.
+3. Press `A RUN` to update to the selected version, or press `Y SETTINGS` and cycle the **PortMaster Version** row to an older supported release first.
 4. If you need to refresh the managed runtime without changing versions, press `X` to reinstall it.
+
+## Power & Lid
+
+When running the managed `PORTS.pak` runtime on `my355`, Porty McPortface enables NextUI-style power handling for both the PortMaster GUI and launched ports:
+
+- Short-press `POWER` to suspend.
+- Close the lid to suspend.
+- Hold `POWER` for about 1 second to shut down.
+
+> [!WARNING]
+> Shutdown does **not** create a save state or resume point. Any unsaved progress since the last in-game save will be lost.
 
 ## Artwork
 

@@ -4,6 +4,7 @@
 #include "apostrophe_widgets.h"
 
 #include "consent.h"
+#include "controller_layout.h"
 #include "http.h"
 #include "install.h"
 #include "json.h"
@@ -13,6 +14,7 @@
 #include "updater_flow.h"
 
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +53,7 @@ static int load_release_candidates(remote_metadata *releases, size_t capacity, s
 static void format_status_body(status_model *model, const install_state *installed,
     const remote_metadata *latest_remote, const remote_metadata *selected_remote, int selection_active);
 static int run_install_job(void *userdata);
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...);
 
 int main(void) {
     char tool_pak_dir[PATH_MAX];
@@ -70,6 +73,7 @@ int main(void) {
     remote_metadata selected_remote = {0};
     install_state installed = {0};
     warning_consent consent = {0};
+    controller_layout current_controller_layout = CONTROLLER_LAYOUT_X360;
     status_model model;
     install_job job;
     ui_updater_choice updater_choice = UI_UPDATER_CANCEL;
@@ -131,6 +135,10 @@ int main(void) {
         memset(&consent, 0, sizeof(consent));
         ap_log("warning consent could not be loaded; treating as not accepted");
     }
+    if (load_controller_layout(&layout, &current_controller_layout) != 0) {
+        current_controller_layout = CONTROLLER_LAYOUT_X360;
+        ap_log("controller layout could not be loaded; defaulting to X360");
+    }
     for (;;) {
         model = resolve_status(installed, selected_remote, files_present);
         format_status_body(&model, &installed, &latest_remote, &selected_remote, selected_index != 0);
@@ -152,13 +160,19 @@ int main(void) {
                 return 0;
             }
 
-            if (decision == FLOW_DECISION_PICK_VERSION) {
-                int picker_index = selected_index;
+            if (decision == FLOW_DECISION_OPEN_SETTINGS) {
+                int settings_index = selected_index;
+                controller_layout settings_layout = current_controller_layout;
 
-                if (show_version_picker(releases, (int)release_count, selected_index, &picker_index) == AP_OK &&
-                        picker_index >= 0 && picker_index < (int)release_count) {
-                    selected_index = picker_index;
-                    selected_remote = releases[selected_index];
+                if (show_settings_screen(&layout, releases, (int)release_count, selected_index, current_controller_layout,
+                        &settings_index, &settings_layout) == AP_OK) {
+                    if (save_controller_layout(&layout, settings_layout) != 0) {
+                        show_message_box("Could not save controller layout.");
+                    } else if (settings_index >= 0 && settings_index < (int)release_count) {
+                        selected_index = settings_index;
+                        selected_remote = releases[selected_index];
+                        current_controller_layout = settings_layout;
+                    }
                 }
                 continue;
             }
@@ -266,14 +280,21 @@ static int build_install_layout(const char *tool_pak_dir, platform_id platform, 
     if (derive_sdcard_root(tool_pak_dir, sdcard_root, sdcard_root_size) != 0)
         return -1;
 
-    snprintf(payload_template_dir, payload_template_dir_size, "%s/payload/PORTS.pak", tool_pak_dir);
-    snprintf(runtime_tools_dir, runtime_tools_dir_size, "%s/resources/runtime-bin/%s", tool_pak_dir, platform_value);
-    snprintf(payload_pak_dir, payload_pak_dir_size, "%s/Emus/%s/PORTS.pak", sdcard_root, platform_value);
-    snprintf(rom_stub_path, rom_stub_path_size, "%s/Roms/Ports (PORTS)/0) Portmaster.sh", sdcard_root);
-    snprintf(installed_tool_pak_dir, installed_tool_pak_dir_size, "%s/Tools/%s/PortMaster.pak", sdcard_root, platform_value);
-    snprintf(installed_tool_launch_path, installed_tool_launch_path_size, "%s/launch.sh", installed_tool_pak_dir);
-    snprintf(installed_tool_metadata_path, installed_tool_metadata_path_size, "%s/pak.json", installed_tool_pak_dir);
-    snprintf(manifest_path, manifest_path_size, "%s/.portmaster-installer.json", payload_pak_dir);
+    if (format_checked(payload_template_dir, payload_template_dir_size, "%s/payload/PORTS.pak", tool_pak_dir) != 0 ||
+            format_checked(runtime_tools_dir, runtime_tools_dir_size, "%s/resources/runtime-bin/%s",
+                tool_pak_dir, platform_value) != 0 ||
+            format_checked(payload_pak_dir, payload_pak_dir_size, "%s/Emus/%s/PORTS.pak",
+                sdcard_root, platform_value) != 0 ||
+            format_checked(rom_stub_path, rom_stub_path_size, "%s/Roms/Ports (PORTS)/0) Portmaster.sh",
+                sdcard_root) != 0 ||
+            format_checked(installed_tool_pak_dir, installed_tool_pak_dir_size, "%s/Tools/%s/PortMaster.pak",
+                sdcard_root, platform_value) != 0 ||
+            format_checked(installed_tool_launch_path, installed_tool_launch_path_size, "%s/launch.sh",
+                installed_tool_pak_dir) != 0 ||
+            format_checked(installed_tool_metadata_path, installed_tool_metadata_path_size, "%s/pak.json",
+                installed_tool_pak_dir) != 0 ||
+            format_checked(manifest_path, manifest_path_size, "%s/.portmaster-installer.json", payload_pak_dir) != 0)
+        return -1;
 
     layout->sdcard_root = sdcard_root;
     layout->tool_pak_dir = tool_pak_dir;
@@ -295,6 +316,20 @@ static void fill_iso8601_now(char *buffer, size_t buffer_size) {
 
     gmtime_r(&now, &tm_now);
     strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%SZ", &tm_now);
+}
+
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...) {
+    va_list args;
+    int written;
+
+    if (buffer == NULL || buffer_size == 0 || format == NULL)
+        return -1;
+
+    va_start(args, format);
+    written = vsnprintf(buffer, buffer_size, format, args);
+    va_end(args);
+
+    return written >= 0 && (size_t)written < buffer_size ? 0 : -1;
 }
 
 static int load_release_candidates(remote_metadata *releases, size_t capacity, size_t *count) {
@@ -367,9 +402,13 @@ static int run_install_job(void *userdata) {
         return AP_ERROR;
     }
 
-    snprintf(archive_path, sizeof(archive_path), "%s/%s", temp_dir, job->remote.runtime_asset_name);
-    snprintf(extract_dir, sizeof(extract_dir), "%s/extract", temp_dir);
-    snprintf(stage_root, sizeof(stage_root), "%s/Apps/PortMaster", extract_dir);
+    if (format_checked(archive_path, sizeof(archive_path), "%s/%s",
+            temp_dir, job->remote.runtime_asset_name) != 0 ||
+            format_checked(extract_dir, sizeof(extract_dir), "%s/extract", temp_dir) != 0 ||
+            format_checked(stage_root, sizeof(stage_root), "%s/Apps/PortMaster", extract_dir) != 0) {
+        snprintf(job->error, sizeof(job->error), "Temporary path is too long.");
+        return AP_ERROR;
+    }
 
     snprintf(job->status_line, sizeof(job->status_line), "Downloading upstream TrimUI runtime...");
     job->progress = 0.25f;

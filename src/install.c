@@ -4,7 +4,9 @@
 #include "json.h"
 #include "process.h"
 
+#include <dirent.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,13 +25,237 @@ static int resolve_extractor_command(char *buffer, size_t buffer_size, const cha
 static int ensure_file_parent_dir(const char *path);
 static int download_if_missing(const char *url, const char *output_path);
 static int install_armhf_runtime(const install_layout *layout);
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...);
+static int replace_portmaster_runtime_preserving_downloaded_runtimes(const char *src, const char *dst);
+static int preserve_downloaded_runtime_artifacts(const char *runtime_dir, const char *preserve_root);
+static int restore_downloaded_runtime_artifacts(const char *preserve_root, const char *runtime_dir);
+static int copy_matching_runtime_artifacts(const char *src_dir, const char *dst_dir,
+    int (*should_copy)(const char *name), int overwrite);
+static int should_preserve_runtime_lib(const char *name);
+static int should_preserve_runtime_autoinstall(const char *name);
+static int has_suffix(const char *value, const char *suffix);
+
+static const char *ASYNC_JPEG_IMAGE_MANAGER_PATCH =
+    "        import queue\n"
+    "        import threading\n"
+    "\n"
+    "        self.cache = []\n"
+    "        self.jpeg_cache_root = Path(os.environ.get(\"XDG_CACHE_HOME\", str(Path.home() / \".cache\"))) / \"PortMaster\" / \"jpeg-cache\"\n"
+    "        self.jpeg_cache_enabled = False\n"
+    "        try:\n"
+    "            self.jpeg_cache_root.mkdir(parents=True, exist_ok=True)\n"
+    "            self.jpeg_cache_enabled = True\n"
+    "        except OSError:\n"
+    "            pass\n"
+    "        self.jpeg_converter = os.environ.get(\"PMI_ARTWORK_CONVERTER\", \"pm-artwork-convert\")\n"
+    "        self.jpeg_high_priority = queue.Queue()\n"
+    "        self.jpeg_low_priority = queue.Queue()\n"
+    "        self.jpeg_completed = queue.Queue()\n"
+    "        self.jpeg_lock = threading.Lock()\n"
+    "        self.jpeg_pending = {}\n"
+    "        self.jpeg_failed = {}\n"
+    "        self.jpeg_promoted = set()\n"
+    "        self.jpeg_warmup_started = set()\n"
+    "        self.jpeg_workers = []\n"
+    "        if self.jpeg_cache_enabled:\n"
+    "            for worker_index in range(2):\n"
+    "                worker = threading.Thread(target=self._jpeg_worker, name=f\"pm-jpeg-{worker_index}\", daemon=True)\n"
+    "                worker.start()\n"
+    "                self.jpeg_workers.append(worker)\n"
+    "\n"
+    "    def _jpeg_cache_entry(self, res_filename):\n"
+    "        import hashlib\n"
+    "\n"
+    "        source_path = Path(os.path.abspath(os.fspath(res_filename)))\n"
+    "        digest = hashlib.sha1(str(source_path).encode(\"utf-8\")).hexdigest()\n"
+    "        return source_path, self.jpeg_cache_root / f\"{digest}.png\"\n"
+    "\n"
+    "    def _jpeg_cache_ready(self, source_path, cached_path, source_mtime=None):\n"
+    "        try:\n"
+    "            if source_mtime is None:\n"
+    "                source_mtime = source_path.stat().st_mtime\n"
+    "            return cached_path.is_file() and cached_path.stat().st_mtime >= source_mtime\n"
+    "        except OSError:\n"
+    "            return False\n"
+    "\n"
+    "    def _queue_jpeg_conversion(self, source_path, *, high_priority):\n"
+    "        if not self.jpeg_cache_enabled:\n"
+    "            return None\n"
+    "\n"
+    "        try:\n"
+    "            source_path, cached_path = self._jpeg_cache_entry(source_path)\n"
+    "            source_mtime = source_path.stat().st_mtime\n"
+    "        except OSError:\n"
+    "            return None\n"
+    "\n"
+    "        if self._jpeg_cache_ready(source_path, cached_path, source_mtime):\n"
+    "            return str(cached_path)\n"
+    "\n"
+    "        source_key = str(source_path)\n"
+    "        queue_item = (source_key, str(cached_path), source_mtime)\n"
+    "        target_queue = self.jpeg_high_priority if high_priority else self.jpeg_low_priority\n"
+    "\n"
+    "        with self.jpeg_lock:\n"
+    "            if self.jpeg_pending.get(source_key) == source_mtime:\n"
+    "                if not high_priority or source_key in self.jpeg_promoted:\n"
+    "                    return None\n"
+    "                self.jpeg_promoted.add(source_key)\n"
+    "            else:\n"
+    "                if self.jpeg_failed.get(source_key) == source_mtime:\n"
+    "                    return None\n"
+    "                self.jpeg_pending[source_key] = source_mtime\n"
+    "                if not high_priority:\n"
+    "                    self.jpeg_promoted.discard(source_key)\n"
+    "\n"
+    "        target_queue.put(queue_item)\n"
+    "        return None\n"
+    "\n"
+    "    def _jpeg_worker(self):\n"
+    "        import queue\n"
+    "        import subprocess\n"
+    "\n"
+    "        while True:\n"
+    "            try:\n"
+    "                job = self.jpeg_high_priority.get_nowait()\n"
+    "            except queue.Empty:\n"
+    "                try:\n"
+    "                    job = self.jpeg_low_priority.get(timeout=0.5)\n"
+    "                except queue.Empty:\n"
+    "                    continue\n"
+    "\n"
+    "            source_key, cached_name, source_mtime = job\n"
+    "            source_path = Path(source_key)\n"
+    "            cached_path = Path(cached_name)\n"
+    "\n"
+    "            if self._jpeg_cache_ready(source_path, cached_path, source_mtime):\n"
+    "                with self.jpeg_lock:\n"
+    "                    if self.jpeg_pending.get(source_key) == source_mtime:\n"
+    "                        self.jpeg_pending.pop(source_key, None)\n"
+    "                    self.jpeg_failed.pop(source_key, None)\n"
+    "                    self.jpeg_promoted.discard(source_key)\n"
+    "                self.jpeg_completed.put((source_key, cached_name))\n"
+    "                continue\n"
+    "\n"
+    "            try:\n"
+    "                cached_path.parent.mkdir(parents=True, exist_ok=True)\n"
+    "                subprocess.run([self.jpeg_converter, source_key, cached_name], check=True,\n"
+    "                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+    "            except Exception:\n"
+    "                with self.jpeg_lock:\n"
+    "                    if self.jpeg_pending.get(source_key) == source_mtime:\n"
+    "                        self.jpeg_pending.pop(source_key, None)\n"
+    "                    self.jpeg_failed[source_key] = source_mtime\n"
+    "                    self.jpeg_promoted.discard(source_key)\n"
+    "                continue\n"
+    "\n"
+    "            if self._jpeg_cache_ready(source_path, cached_path, source_mtime):\n"
+    "                with self.jpeg_lock:\n"
+    "                    if self.jpeg_pending.get(source_key) == source_mtime:\n"
+    "                        self.jpeg_pending.pop(source_key, None)\n"
+    "                    self.jpeg_failed.pop(source_key, None)\n"
+    "                    self.jpeg_promoted.discard(source_key)\n"
+    "                self.jpeg_completed.put((source_key, cached_name))\n"
+    "            else:\n"
+    "                with self.jpeg_lock:\n"
+    "                    if self.jpeg_pending.get(source_key) == source_mtime:\n"
+    "                        self.jpeg_pending.pop(source_key, None)\n"
+    "                    self.jpeg_failed[source_key] = source_mtime\n"
+    "                    self.jpeg_promoted.discard(source_key)\n"
+    "\n"
+    "    def warmup_jpeg_directory(self, directory):\n"
+    "        import threading\n"
+    "\n"
+    "        if not self.jpeg_cache_enabled:\n"
+    "            return\n"
+    "\n"
+    "        directory = Path(directory)\n"
+    "        if not directory.is_dir():\n"
+    "            return\n"
+    "\n"
+    "        directory_key = str(directory)\n"
+    "        with self.jpeg_lock:\n"
+    "            if directory_key in self.jpeg_warmup_started:\n"
+    "                return\n"
+    "            self.jpeg_warmup_started.add(directory_key)\n"
+    "\n"
+    "        threading.Thread(target=self._warmup_jpeg_directory, args=(directory,), daemon=True).start()\n"
+    "\n"
+    "    def _warmup_jpeg_directory(self, directory):\n"
+    "        try:\n"
+    "            entries = list(directory.iterdir())\n"
+    "        except OSError:\n"
+    "            return\n"
+    "\n"
+    "        for entry in entries:\n"
+    "            if not entry.is_file():\n"
+    "                continue\n"
+    "            if entry.suffix.lower() not in (\".jpg\", \".jpeg\"):\n"
+    "                continue\n"
+    "            self._queue_jpeg_conversion(entry, high_priority=False)\n"
+    "\n"
+    "    def poll_completed_jpegs(self):\n"
+    "        import queue\n"
+    "\n"
+    "        completed = []\n"
+    "        while True:\n"
+    "            try:\n"
+    "                completed.append(self.jpeg_completed.get_nowait())\n"
+    "            except queue.Empty:\n"
+    "                return completed\n"
+    "\n"
+    "    def resolve_image_path(self, res_filename):\n"
+    "        source_path = Path(os.fspath(res_filename))\n"
+    "        if source_path.suffix.lower() not in (\".jpg\", \".jpeg\"):\n"
+    "            return res_filename\n"
+    "\n"
+    "        source_path, cached_path = self._jpeg_cache_entry(source_path)\n"
+    "        if self._jpeg_cache_ready(source_path, cached_path):\n"
+    "            return str(cached_path)\n"
+    "\n"
+    "        self._queue_jpeg_conversion(source_path, high_priority=True)\n"
+    "        return res_filename\n"
+    "\n"
+    "    def load(self, filename):\n";
+
+static const char *PUGWASH_ARTWORK_WARMUP_PATCH =
+    "    def get_port_image(self, port_name):\n"
+    "        image = None\n"
+    "        if self.hm is not None:\n"
+    "            image = self.hm.port_images(port_name)\n"
+    "\n"
+    "            if image is not None:\n"
+    "                image = image.get('screenshot', None)\n"
+    "\n"
+    "        if image is None:\n"
+    "            image = \"NO_IMAGE\"\n"
+    "\n"
+    "        return image\n"
+    "\n"
+    "    def start_artwork_warmup(self):\n"
+    "        if self.hm is None:\n"
+    "            return\n"
+    "\n"
+    "        images_dir = self.hm.cfg_dir / \"images_pm\"\n"
+    "        self.images.warmup_jpeg_directory(images_dir)\n"
+    "\n"
+    "    def poll_artwork_cache_updates(self):\n"
+    "        completed = self.images.poll_completed_jpegs()\n"
+    "        if len(completed) == 0:\n"
+    "            return\n"
+    "\n"
+    "        for source_path, cached_path in completed:\n"
+    "            for key, value in list(self.text_data.items()):\n"
+    "                if isinstance(value, str) and value == source_path:\n"
+    "                    self.set_data(key, cached_path)\n"
+    "\n"
+    "    def set_port_info(self, port_name, port_info, want_install_size=False):\n";
 
 int extract_stage_archive(const char *tool_pak_dir, const char *archive_path, const char *extract_dir) {
     char extractor[PATH_MAX];
     char quoted_extractor[PATH_MAX];
     char quoted_archive[PATH_MAX];
     char quoted_extract_dir[PATH_MAX];
-    char command[PATH_MAX * 3];
+    char command[PATH_MAX * 3 + 32];
 
     if (resolve_extractor_command(extractor, sizeof(extractor), tool_pak_dir) != 0)
         return -1;
@@ -41,7 +267,9 @@ int extract_stage_archive(const char *tool_pak_dir, const char *archive_path, co
     if (fs_ensure_dir(extract_dir) != 0)
         return -1;
 
-    snprintf(command, sizeof(command), "%s x -y %s -o%s", quoted_extractor, quoted_archive, quoted_extract_dir);
+    if (format_checked(command, sizeof(command), "%s x -y %s -o%s",
+            quoted_extractor, quoted_archive, quoted_extract_dir) != 0)
+        return -1;
     return run_command(command);
 }
 
@@ -67,16 +295,19 @@ int install_files_present(const install_layout *layout) {
     char runtime_launch[PATH_MAX];
     char pugwash_path[PATH_MAX];
     char armhf_rootfs_partaa[PATH_MAX];
+    char armhf_libbz2[PATH_MAX];
 
     snprintf(runtime_launch, sizeof(runtime_launch), "%s/launch.sh", layout->payload_pak_dir);
     snprintf(pugwash_path, sizeof(pugwash_path), "%s/PortMaster/pugwash", layout->payload_pak_dir);
     snprintf(armhf_rootfs_partaa, sizeof(armhf_rootfs_partaa), "%s/runtime/armhf/miyoo355_rootfs_32.img_partaa", layout->payload_pak_dir);
+    snprintf(armhf_libbz2, sizeof(armhf_libbz2), "%s/runtime/armhf/lib/libbz2.so.1.0", layout->payload_pak_dir);
 
     return fs_path_exists(layout->manifest_path) &&
         fs_path_exists(layout->rom_stub_path) &&
         fs_path_exists(runtime_launch) &&
         fs_path_exists(pugwash_path) &&
-        fs_path_exists(armhf_rootfs_partaa);
+        fs_path_exists(armhf_rootfs_partaa) &&
+        fs_path_exists(armhf_libbz2);
 }
 
 int install_from_stage(const char *stage_root, const install_layout *layout, const install_state *state) {
@@ -89,7 +320,7 @@ int install_from_stage(const char *stage_root, const install_layout *layout, con
 
     snprintf(src, sizeof(src), "%s/PortMaster", stage_root);
     snprintf(dst, sizeof(dst), "%s/PortMaster", layout->payload_pak_dir);
-    if (replace_tree(src, dst) != 0)
+    if (replace_portmaster_runtime_preserving_downloaded_runtimes(src, dst) != 0)
         return -1;
 
     if (copy_payload_compatibility_files(layout) != 0)
@@ -113,6 +344,130 @@ int install_from_stage(const char *stage_root, const install_layout *layout, con
         return -1;
 
     return 0;
+}
+
+static int replace_portmaster_runtime_preserving_downloaded_runtimes(const char *src, const char *dst) {
+    char preserve_template[] = "/tmp/porty-runtime-preserve-XXXXXX";
+    char *preserve_root;
+
+    preserve_root = mkdtemp(preserve_template);
+    if (preserve_root == NULL)
+        return -1;
+
+    if (preserve_downloaded_runtime_artifacts(dst, preserve_root) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    if (replace_tree(src, dst) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    if (restore_downloaded_runtime_artifacts(preserve_root, dst) != 0) {
+        (void)fs_remove_path(preserve_root);
+        return -1;
+    }
+
+    (void)fs_remove_path(preserve_root);
+    return 0;
+}
+
+static int preserve_downloaded_runtime_artifacts(const char *runtime_dir, const char *preserve_root) {
+    char src_dir[PATH_MAX];
+    char dst_dir[PATH_MAX];
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/libs", runtime_dir) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/libs", preserve_root) != 0)
+        return -1;
+    if (copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_lib, 1) != 0)
+        return -1;
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/autoinstall", runtime_dir) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/autoinstall", preserve_root) != 0)
+        return -1;
+    return copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_autoinstall, 1);
+}
+
+static int restore_downloaded_runtime_artifacts(const char *preserve_root, const char *runtime_dir) {
+    char src_dir[PATH_MAX];
+    char dst_dir[PATH_MAX];
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/libs", preserve_root) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/libs", runtime_dir) != 0)
+        return -1;
+    if (copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_lib, 0) != 0)
+        return -1;
+
+    if (format_checked(src_dir, sizeof(src_dir), "%s/autoinstall", preserve_root) != 0 ||
+            format_checked(dst_dir, sizeof(dst_dir), "%s/autoinstall", runtime_dir) != 0)
+        return -1;
+    return copy_matching_runtime_artifacts(src_dir, dst_dir, should_preserve_runtime_autoinstall, 0);
+}
+
+static int copy_matching_runtime_artifacts(const char *src_dir, const char *dst_dir,
+    int (*should_copy)(const char *name), int overwrite) {
+    DIR *dir;
+    struct dirent *entry;
+
+    if (!fs_path_exists(src_dir))
+        return 0;
+
+    dir = opendir(src_dir);
+    if (dir == NULL)
+        return -1;
+
+    while ((entry = readdir(dir)) != NULL) {
+        char src_path[PATH_MAX];
+        char dst_path[PATH_MAX];
+        struct stat st;
+
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        if (!should_copy(entry->d_name))
+            continue;
+        if (format_checked(src_path, sizeof(src_path), "%s/%s", src_dir, entry->d_name) != 0 ||
+                format_checked(dst_path, sizeof(dst_path), "%s/%s", dst_dir, entry->d_name) != 0) {
+            closedir(dir);
+            return -1;
+        }
+        if (lstat(src_path, &st) != 0) {
+            closedir(dir);
+            return -1;
+        }
+        if (!S_ISREG(st.st_mode))
+            continue;
+        if (!overwrite && fs_path_exists(dst_path))
+            continue;
+        if (copy_file(src_path, dst_path) != 0) {
+            closedir(dir);
+            return -1;
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+static int should_preserve_runtime_lib(const char *name) {
+    return has_suffix(name, ".squashfs");
+}
+
+static int should_preserve_runtime_autoinstall(const char *name) {
+    return strcmp(name, "runtimes.zip") == 0 || has_suffix(name, ".squashfs");
+}
+
+static int has_suffix(const char *value, const char *suffix) {
+    size_t value_len;
+    size_t suffix_len;
+
+    if (value == NULL || suffix == NULL)
+        return 0;
+
+    value_len = strlen(value);
+    suffix_len = strlen(suffix);
+    return value_len >= suffix_len &&
+        strcmp(value + value_len - suffix_len, suffix) == 0;
 }
 
 static int copy_payload_compatibility_files(const install_layout *layout) {
@@ -179,6 +534,12 @@ static int copy_payload_compatibility_files(const install_layout *layout) {
     if (copy_file(src, dst) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/files/gamecontrollerdb_nintendo.txt", layout->payload_template_dir);
+    snprintf(dst, sizeof(dst), "%s/files/gamecontrollerdb_nintendo.txt", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/files/gamecontrollerdb.txt", layout->payload_template_dir);
     snprintf(dst, sizeof(dst), "%s/PortMaster/gamecontrollerdb.txt", layout->payload_pak_dir);
     if (copy_file(src, dst) != 0)
         return -1;
@@ -263,6 +624,56 @@ static int install_runtime_support_tools(const install_layout *layout) {
     if (chmod(dst, 0755) != 0)
         return -1;
 
+    snprintf(src, sizeof(src), "%s/pm-sdl-compat-check", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-sdl-compat-check", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/pm-port-probe", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-port-probe", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/pm-armhf-exec-wrapper", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-armhf-exec-wrapper", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/rsync", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/rsync", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/pm-power-lid-watch", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+
+    snprintf(dst, sizeof(dst), "%s/bin/pm-power-lid-watch", layout->payload_pak_dir);
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
     if (install_armhf_runtime(layout) != 0)
         return -1;
 
@@ -287,7 +698,51 @@ static int install_runtime_support_tools(const install_layout *layout) {
     if (!fs_path_exists(src))
         return -1;
     snprintf(dst, sizeof(dst), "%s/lib/box64-x86_64-linux-gnu", layout->payload_pak_dir);
-    return replace_tree(src, dst);
+    if (replace_tree(src, dst) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/libSDL2-2.0.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/lib/libSDL2-2.0.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulse-simple.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulse-simple.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulse.so.0", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulse.so.0", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    if (chmod(dst, 0755) != 0)
+        return -1;
+
+    snprintf(src, sizeof(src), "%s/aarch64/pulse/libpulsecommon-13.99.so", layout->runtime_tools_dir);
+    if (!fs_path_exists(src))
+        return -1;
+    snprintf(dst, sizeof(dst), "%s/runtime/aarch64/pulse/libpulsecommon-13.99.so", layout->payload_pak_dir);
+    if (ensure_file_parent_dir(dst) != 0)
+        return -1;
+    if (copy_file(src, dst) != 0)
+        return -1;
+    return chmod(dst, 0755);
 }
 
 static int ensure_file_parent_dir(const char *path) {
@@ -303,6 +758,20 @@ static int ensure_file_parent_dir(const char *path) {
     return fs_ensure_dir(parent);
 }
 
+static int format_checked(char *buffer, size_t buffer_size, const char *format, ...) {
+    va_list args;
+    int written;
+
+    if (buffer == NULL || buffer_size == 0 || format == NULL)
+        return -1;
+
+    va_start(args, format);
+    written = vsnprintf(buffer, buffer_size, format, args);
+    va_end(args);
+
+    return written >= 0 && (size_t)written < buffer_size ? 0 : -1;
+}
+
 static int download_if_missing(const char *url, const char *output_path) {
     if (fs_path_exists(output_path))
         return 0;
@@ -315,6 +784,7 @@ static int install_armhf_runtime(const install_layout *layout) {
     char src[PATH_MAX];
     char dst[PATH_MAX];
     char url[PATH_MAX];
+    char output_path[PATH_MAX];
     const char *parts[] = {
         "miyoo355_rootfs_32.img_partaa",
         "miyoo355_rootfs_32.img_partab",
@@ -322,22 +792,31 @@ static int install_armhf_runtime(const install_layout *layout) {
     };
     size_t index;
 
-    snprintf(src, sizeof(src), "%s/armhf", layout->runtime_tools_dir);
-    snprintf(dst, sizeof(dst), "%s/runtime/armhf", layout->payload_pak_dir);
-    if (fs_path_exists(src))
-        return replace_tree(src, dst);
-
-    if (fs_ensure_dir(dst) != 0)
+    if (format_checked(src, sizeof(src), "%s/armhf", layout->runtime_tools_dir) != 0 ||
+            format_checked(dst, sizeof(dst), "%s/runtime/armhf", layout->payload_pak_dir) != 0)
         return -1;
+    if (fs_path_exists(src)) {
+        if (replace_tree(src, dst) != 0)
+            return -1;
+    } else if (fs_ensure_dir(dst) != 0) {
+        return -1;
+    }
 
     for (index = 0; index < sizeof(parts) / sizeof(parts[0]); index++) {
-        char output_path[PATH_MAX];
-
-        snprintf(url, sizeof(url), "%s/%s", SPRUCE_FLIP_RAW_BASE, parts[index]);
-        snprintf(output_path, sizeof(output_path), "%s/%s", dst, parts[index]);
+        if (format_checked(url, sizeof(url), "%s/%s", SPRUCE_FLIP_RAW_BASE, parts[index]) != 0 ||
+                format_checked(output_path, sizeof(output_path), "%s/%s", dst, parts[index]) != 0)
+            return -1;
         if (download_if_missing(url, output_path) != 0)
             return -1;
     }
+
+    if (format_checked(url, sizeof(url), "%s/lib32/libbz2.so.1.0", SPRUCE_FLIP_RAW_BASE) != 0 ||
+            format_checked(output_path, sizeof(output_path), "%s/lib/libbz2.so.1.0", dst) != 0)
+        return -1;
+    if (download_if_missing(url, output_path) != 0)
+        return -1;
+    if (chmod(output_path, 0755) != 0)
+        return -1;
 
     return 0;
 }
@@ -349,9 +828,10 @@ static int unpack_runtime_pylibs(const install_layout *layout) {
     char quoted_runtime_dir[PATH_MAX];
     char command[PATH_MAX * 2];
 
-    snprintf(runtime_dir, sizeof(runtime_dir), "%s/PortMaster", layout->payload_pak_dir);
-    snprintf(pylibs_zip, sizeof(pylibs_zip), "%s/pylibs.zip", runtime_dir);
-    snprintf(pylibs_md5, sizeof(pylibs_md5), "%s/pylibs.zip.md5", runtime_dir);
+    if (format_checked(runtime_dir, sizeof(runtime_dir), "%s/PortMaster", layout->payload_pak_dir) != 0 ||
+            format_checked(pylibs_zip, sizeof(pylibs_zip), "%s/pylibs.zip", runtime_dir) != 0 ||
+            format_checked(pylibs_md5, sizeof(pylibs_md5), "%s/pylibs.zip.md5", runtime_dir) != 0)
+        return -1;
 
     if (!fs_path_exists(pylibs_zip))
         return 0;
@@ -359,9 +839,10 @@ static int unpack_runtime_pylibs(const install_layout *layout) {
     if (shell_quote(quoted_runtime_dir, sizeof(quoted_runtime_dir), runtime_dir) != 0)
         return -1;
 
-    snprintf(command, sizeof(command),
-        "cd %s && unzip -oq pylibs.zip && rm -f pylibs.zip pylibs.zip.md5",
-        quoted_runtime_dir);
+    if (format_checked(command, sizeof(command),
+            "cd %s && unzip -oq pylibs.zip && rm -f pylibs.zip pylibs.zip.md5",
+            quoted_runtime_dir) != 0)
+        return -1;
     if (run_command(command) != 0)
         return -1;
 
@@ -432,6 +913,42 @@ static int patch_runtime_compatibility_files(const install_layout *layout) {
                 "def portmaster_check_update(pm, config, temp_dir):\n",
                 "def portmaster_check_update(pm, config, temp_dir):\n    return False\n") != 0)
             return -1;
+        if (patch_text_file(pugwash,
+                "    def get_port_image(self, port_name):\n"
+                "        image = None\n"
+                "        if self.hm is not None:\n"
+                "            image = self.hm.port_images(port_name)\n"
+                "\n"
+                "            if image is not None:\n"
+                "                image = image.get('screenshot', None)\n"
+                "\n"
+                "        if image is None:\n"
+                "            image = \"NO_IMAGE\"\n"
+                "\n"
+                "        return image\n"
+                "\n"
+                "    def set_port_info(self, port_name, port_info, want_install_size=False):\n",
+                PUGWASH_ARTWORK_WARMUP_PATCH) != 0)
+            return -1;
+        if (patch_text_file_all(pugwash,
+                "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n",
+                "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n"
+                "            pm.start_artwork_warmup()\n") != 0)
+            return -1;
+        if (patch_text_file(pugwash,
+                "        # Update scanning\n"
+                "        if self.timers.elapsed('dir_scan_interval', 500, run_first=True):\n"
+                "            self.dir_scanner.iterate(30)\n"
+                "\n"
+                "        ## Check for any keys changed in our template system.\n",
+                "        # Update scanning\n"
+                "        if self.timers.elapsed('dir_scan_interval', 500, run_first=True):\n"
+                "            self.dir_scanner.iterate(30)\n"
+                "\n"
+                "        self.poll_artwork_cache_updates()\n"
+                "\n"
+                "        ## Check for any keys changed in our template system.\n") != 0)
+            return -1;
     }
 
     snprintf(theme_json, sizeof(theme_json), "%s/PortMaster/pylibs/default_theme/theme.json", layout->payload_pak_dir);
@@ -445,33 +962,10 @@ static int patch_runtime_compatibility_files(const install_layout *layout) {
     snprintf(pysdl2gui, sizeof(pysdl2gui), "%s/PortMaster/pylibs/pySDL2gui.py", layout->payload_pak_dir);
     if (fs_path_exists(pysdl2gui)) {
         if (patch_text_file(pysdl2gui,
+                "        self.cache = []\n"
+                "\n"
                 "    def load(self, filename):\n",
-                "    def resolve_image_path(self, res_filename):\n"
-                "        import os\n"
-                "        import subprocess\n"
-                "\n"
-                "        res_path = os.fspath(res_filename)\n"
-                "        lower_name = res_path.lower()\n"
-                "        if not (lower_name.endswith(\".jpg\") or lower_name.endswith(\".jpeg\")):\n"
-                "            return res_filename\n"
-                "\n"
-                "        converter = os.environ.get(\"PMI_ARTWORK_CONVERTER\", \"pm-artwork-convert\")\n"
-                "        cached_name = f\"{res_path}.pm.png\"\n"
-                "\n"
-                "        try:\n"
-                "            source_mtime = os.path.getmtime(res_path)\n"
-                "            cached_mtime = os.path.getmtime(cached_name) if os.path.exists(cached_name) else 0\n"
-                "            if cached_mtime < source_mtime:\n"
-                "                subprocess.run([converter, res_path, cached_name], check=True,\n"
-                "                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
-                "            if os.path.exists(cached_name):\n"
-                "                return cached_name\n"
-                "        except Exception:\n"
-                "            return res_filename\n"
-                "\n"
-                "        return res_filename\n"
-                "\n"
-                "    def load(self, filename):\n") != 0)
+                ASYNC_JPEG_IMAGE_MANAGER_PATCH) != 0)
             return -1;
 
         if (patch_text_file(pysdl2gui,

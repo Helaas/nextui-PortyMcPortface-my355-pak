@@ -10,3 +10,4 @@ Installer.pak/
 *.dll
 *.exe
 .DS_Store
+.tmp-RVGL.sh

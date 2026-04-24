@@ -1,6 +1,7 @@
 #include "consent.h"
 
 #include "fs.h"
+#include "userdata.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -9,26 +10,10 @@
 
 #define CONSENT_FILENAME "warning-consent.json"
 
-static int consent_dir_for_layout(const install_layout *layout, char *buffer, size_t buffer_size) {
-    const char *shared = getenv("SHARED_USERDATA_PATH");
-    const char *userdata = getenv("USERDATA_PATH");
-
-    if (layout == NULL || buffer == NULL || buffer_size == 0 ||
-            layout->sdcard_root == NULL || layout->platform_name == NULL)
-        return -1;
-
-    if (shared != NULL && shared[0] != '\0')
-        return snprintf(buffer, buffer_size, "%s/PORTS-portmaster", shared) < (int)buffer_size ? 0 : -1;
-    if (userdata != NULL && userdata[0] != '\0')
-        return snprintf(buffer, buffer_size, "%s/PORTS-portmaster", userdata) < (int)buffer_size ? 0 : -1;
-    return snprintf(buffer, buffer_size, "%s/.userdata/%s/PORTS-portmaster",
-        layout->sdcard_root, layout->platform_name) < (int)buffer_size ? 0 : -1;
-}
-
 int consent_path_for_layout(const install_layout *layout, char *buffer, size_t buffer_size) {
     char dir[PATH_MAX];
 
-    if (consent_dir_for_layout(layout, dir, sizeof(dir)) != 0)
+    if (portmaster_userdata_dir_for_layout(layout, dir, sizeof(dir)) != 0)
         return -1;
 
     return snprintf(buffer, buffer_size, "%s/%s", dir, CONSENT_FILENAME) < (int)buffer_size ? 0 : -1;
@@ -96,7 +81,7 @@ int save_warning_consent(const install_layout *layout, const warning_consent *co
 
     if (consent == NULL)
         return -1;
-    if (consent_dir_for_layout(layout, dir, sizeof(dir)) != 0)
+    if (portmaster_userdata_dir_for_layout(layout, dir, sizeof(dir)) != 0)
         return -1;
     if (consent_path_for_layout(layout, path, sizeof(path)) != 0)
         return -1;

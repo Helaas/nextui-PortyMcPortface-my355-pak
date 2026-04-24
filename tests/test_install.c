@@ -13,6 +13,27 @@ static void join_path(char *buffer, size_t buffer_size, const char *root, const 
     snprintf(buffer, buffer_size, "%s/%s", root, suffix);
 }
 
+static void assert_text_file_equals(const char *path, const char *expected) {
+    char *content = NULL;
+    size_t len = 0;
+
+    assert(read_text_file_alloc(path, &content, &len) == 0);
+    assert(strcmp(content, expected) == 0);
+    free(content);
+    (void)len;
+}
+
+static void assert_control_keeps_runtime_libs_for_system_gl(const char *path) {
+    char *content = NULL;
+    size_t len = 0;
+
+    assert(read_text_file_alloc(path, &content, &len) == 0);
+    assert(strstr(content, "if [ \"${PMI_LD_LIBRARY_STRATEGY:-}\" = \"system-gl\" ]; then") != NULL);
+    assert(strstr(content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib:${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
+    free(content);
+    (void)len;
+}
+
 int main(void) {
     char root_template[] = "/tmp/pm-installer-test-XXXXXX";
     char *root = mkdtemp(root_template);
@@ -50,11 +71,62 @@ int main(void) {
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/runtime.txt", stage_root);
     assert(write_text_file(file_path, "runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", stage_root);
+    assert(write_text_file(file_path, "fresh-upstream-runtime") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pugwash", stage_root);
     assert(write_text_file(file_path,
         "#!/usr/bin/env python3\n"
         "def portmaster_check_update(pm, config, temp_dir):\n"
-        "    print('updating')\n") == 0);
+        "    print('updating')\n"
+        "\n"
+        "class HarbourMaster:\n"
+        "    pass\n"
+        "\n"
+        "class PortMasterGUI:\n"
+        "    def __init__(self):\n"
+        "        self.hm = None\n"
+        "        self.images = None\n"
+        "        self.text_data = {}\n"
+        "        self.changed_keys = set()\n"
+        "        self.timers = None\n"
+        "        self.dir_scanner = None\n"
+        "\n"
+        "    def set_data(self, key, value):\n"
+        "        self.text_data[key] = value\n"
+        "        self.changed_keys.add(key)\n"
+        "\n"
+        "    def get_port_image(self, port_name):\n"
+        "        image = None\n"
+        "        if self.hm is not None:\n"
+        "            image = self.hm.port_images(port_name)\n"
+        "\n"
+        "            if image is not None:\n"
+        "                image = image.get('screenshot', None)\n"
+        "\n"
+        "        if image is None:\n"
+        "            image = \"NO_IMAGE\"\n"
+        "\n"
+        "        return image\n"
+        "\n"
+        "    def set_port_info(self, port_name, port_info, want_install_size=False):\n"
+        "        return None\n"
+        "\n"
+        "    def do_update(self):\n"
+        "        # Update scanning\n"
+        "        if self.timers.elapsed('dir_scan_interval', 500, run_first=True):\n"
+        "            self.dir_scanner.iterate(30)\n"
+        "\n"
+        "        ## Check for any keys changed in our template system.\n"
+        "        if len(self.changed_keys):\n"
+        "            self.changed_keys.clear()\n"
+        "\n"
+        "def create_pm(config, temp_dir, argv):\n"
+        "    pm = PortMasterGUI()\n"
+        "    if len(argv) > 1 and argv[1] == 'fifo_control':\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n"
+        "    with pm.enable_cancellable(False):\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n"
+        "            pm.hm = HarbourMaster(config, temp_dir=temp_dir, callback=pm)\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/harbourmaster/platform.py", stage_root);
     assert(write_text_file(file_path,
         "import os\n"
@@ -107,6 +179,20 @@ int main(void) {
         "}\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/pySDL2gui.py", stage_root);
     assert(write_text_file(file_path,
+        "import os\n"
+        "from pathlib import Path\n"
+        "\n"
+        "class Image:\n"
+        "    pass\n"
+        "\n"
+        "class ImageManager:\n"
+        "    def __init__(self, gui, max_images=None):\n"
+        "        self.gui = gui\n"
+        "        self.renderer = gui.renderer\n"
+        "        self.images = {}\n"
+        "        self.textures = {}\n"
+        "        self.cache = []\n"
+        "\n"
         "    def load(self, filename):\n"
         "        if filename in self.cache:\n"
         "            return self.images[filename]\n"
@@ -161,6 +247,16 @@ int main(void) {
         "            return image\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/pm-artwork-convert", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-sdl-compat-check", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-port-probe", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-armhf-exec-wrapper", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/rsync", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/pm-power-lid-watch", runtime_tools_dir);
+    assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64", runtime_tools_dir);
     assert(write_text_file(file_path, "#!/bin/sh\nexit 0\n") == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf");
@@ -171,6 +267,10 @@ int main(void) {
     assert(write_text_file(file_path, "rootfs-ab") == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/miyoo355_rootfs_32.img_partac");
     assert(write_text_file(file_path, "rootfs-ac") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/lib");
+    assert(fs_ensure_dir(file_path) == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/lib/libbz2.so.1.0");
+    assert(write_text_file(file_path, "armhf-bzip2") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64-i386-linux-gnu", runtime_tools_dir);
     assert(fs_ensure_dir(file_path) == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "box64-i386-linux-gnu/libstdc++.so.6");
@@ -181,6 +281,18 @@ int main(void) {
     assert(fs_ensure_dir(file_path) == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "box64-x86_64-linux-gnu/libc.so.6");
     assert(write_text_file(file_path, "x64-libc") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64");
+    assert(fs_ensure_dir(file_path) == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/libSDL2-2.0.so.0");
+    assert(write_text_file(file_path, "aarch64-sdl2") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/pulse");
+    assert(fs_ensure_dir(file_path) == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/pulse/libpulse-simple.so.0");
+    assert(write_text_file(file_path, "aarch64-pulse-simple") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/pulse/libpulse.so.0");
+    assert(write_text_file(file_path, "aarch64-pulse") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "aarch64/pulse/libpulsecommon-13.99.so");
+    assert(write_text_file(file_path, "aarch64-pulse-common") == 0);
     assert(write_text_file(tool_launch, "#!/bin/sh\nexit 0\n") == 0);
     assert(write_text_file(tool_metadata, "{}\n") == 0);
 
@@ -203,6 +315,25 @@ int main(void) {
     layout.manifest_path = manifest_path;
     layout.platform_name = "my355";
 
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/mono-6.12.0.122-aarch64.squashfs", payload_dir);
+    assert(write_text_file(file_path, "downloaded-mono-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", payload_dir);
+    assert(write_text_file(file_path, "old-downloaded-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/libsomething.so", payload_dir);
+    assert(write_text_file(file_path, "do-not-preserve") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/runtime-dir.squashfs", payload_dir);
+    assert(fs_ensure_dir(file_path) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/pending-runtime.squashfs", payload_dir);
+    assert(write_text_file(file_path, "pending-runtime") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/runtimes.zip", payload_dir);
+    assert(write_text_file(file_path, "pending-runtime-zip") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/readme.txt", payload_dir);
+    assert(write_text_file(file_path, "do-not-preserve") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/stale-local-file.txt", payload_dir);
+    assert(write_text_file(file_path, "remove-me") == 0);
+    snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
+    assert(write_text_file(file_path, "stale-vendored-lib") == 0);
+
     assert(install_from_stage(stage_root, &layout, &state) == 0);
     assert(stat(layout.rom_stub_path, &st) == 0);
     assert(stat(layout.manifest_path, &st) == 0);
@@ -211,6 +342,22 @@ int main(void) {
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/runtime.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/stale-local-file.txt", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/mono-6.12.0.122-aarch64.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "downloaded-mono-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/upstream-runtime.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "fresh-upstream-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/libsomething.so", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/libs/runtime-dir.squashfs", payload_dir);
+    assert(stat(file_path, &st) != 0);
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/pending-runtime.squashfs", payload_dir);
+    assert_text_file_equals(file_path, "pending-runtime");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/runtimes.zip", payload_dir);
+    assert_text_file_equals(file_path, "pending-runtime-zip");
+    snprintf(file_path, sizeof(file_path), "%s/PortMaster/autoinstall/readme.txt", payload_dir);
+    assert(stat(file_path, &st) != 0);
     snprintf(file_path, sizeof(file_path), "%s/files/config.json", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/PortMaster.txt", payload_dir);
@@ -218,6 +365,8 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/files/config.py", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/gamecontrollerdb.txt", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/files/gamecontrollerdb_nintendo.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/bin.tar.gz", payload_dir);
     assert(stat(file_path, &st) == 0);
@@ -229,10 +378,14 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/libffi.so.7", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/files/control.txt", payload_dir);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/control.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/miyoo/control.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/PortMaster.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/PortMaster.sh", payload_dir);
@@ -245,6 +398,16 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/pm-artwork-convert", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-sdl-compat-check", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-port-probe", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-armhf-exec-wrapper", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/rsync", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/bin/pm-power-lid-watch", payload_dir);
+    assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/bin/box64", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partaa", payload_dir);
@@ -253,8 +416,18 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partac", payload_dir);
     assert(stat(file_path, &st) == 0);
-    snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/lib/libbz2.so.1.0", payload_dir);
+    assert_text_file_equals(file_path, "armhf-bzip2");
+    snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/lib/libSDL2-2.0.so.0", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/pulse/libpulse-simple.so.0", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/pulse/libpulse.so.0", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/pulse/libpulsecommon-13.99.so", payload_dir);
+    assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libstdc++.so.6", payload_dir);
+    assert_text_file_equals(file_path, "i386-libstdc++");
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-i386-linux-gnu/libgcc_s.so.1", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/lib/box64-x86_64-linux-gnu/libc.so.6", payload_dir);
@@ -291,7 +464,10 @@ int main(void) {
     assert(strstr(file_content, "resolve_controller_mapping()") == NULL);
     assert(strstr(file_content, "log_control_diagnostics()") == NULL);
     assert(strstr(file_content, "export PATH=\"${runtime_root%/PortMaster}/bin:$PATH\"") != NULL);
+    assert(strstr(file_content, "if [ \"${PMI_LD_LIBRARY_STRATEGY:-}\" = \"system-gl\" ]; then") != NULL);
+    assert(strstr(file_content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib:${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
     assert(strstr(file_content, "export LD_LIBRARY_PATH=\"${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
+    assert(strstr(file_content, "PMI_GAMECONTROLLERDB_FILE:-$controlfolder/gamecontrollerdb.txt") != NULL);
     assert(strstr(file_content, "SDL_GAMECONTROLLERCONFIG=") == NULL);
     assert(strstr(file_content, "source \"$controlfolder/device_info.txt\"") != NULL);
     assert(strstr(file_content, "source \"$controlfolder/funcs.txt\"") != NULL);
@@ -308,21 +484,27 @@ int main(void) {
     assert(strstr(file_content, "if mount | grep -q \"on $SPRUCE_ARMHF_ROOTFS_MOUNT \"; then") != NULL);
     assert(strstr(file_content, "ensure_runtime_parity_overlay()") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall()") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/control.txt\" \"$PM_RUNTIME_ROOT/control.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/control.txt\" \"$PM_RUNTIME_ROOT/miyoo/control.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/PortMaster.txt\" \"$PM_RUNTIME_ROOT/PortMaster.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/PortMaster.txt\" \"$PM_RUNTIME_ROOT/PortMaster.sh\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/PortMaster.txt\" \"$PM_RUNTIME_ROOT/miyoo/PortMaster.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/config.py\" \"$PM_RUNTIME_ROOT/pylibs/harbourmaster/config.py\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/gamecontrollerdb.txt\" \"$PM_RUNTIME_ROOT/gamecontrollerdb.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/control.txt\" \"$xdg_pm_dir/control.txt\"") != NULL);
-    assert(strstr(file_content, "sync_overlay_file \"$PAK_DIR/files/gamecontrollerdb.txt\" \"$xdg_pm_dir/gamecontrollerdb.txt\"") != NULL);
+    assert(strstr(file_content, "overlay_sync_stamp_path()") != NULL);
+    assert(strstr(file_content, "sync_overlay_file_if_needed()") != NULL);
+    assert(strstr(file_content, "runtime_overlay_is_stale()") != NULL);
+    assert(strstr(file_content, "touch_stamp_file \"$stamp_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_sync_refresh=$stamp_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_sync_cached=$stamp_path\"") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$PM_RUNTIME_ROOT/autoinstall\"") != NULL);
     assert(strstr(file_content, "process_runtime_autoinstall_dir \"$XDG_DATA_HOME/PortMaster/autoinstall\"") != NULL);
+    assert(strstr(file_content, "active_controller_db_source()") != NULL);
+    assert(strstr(file_content, "controller_db_src=$(default_controller_db_source)") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_layout=xbox\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG overlay_controller_db_source=$controller_db_src\"") != NULL);
     assert(strstr(file_content, "PMI_DIAG overlay_controller_db=$PM_RUNTIME_ROOT/gamecontrollerdb.txt") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG port_controller_layout=$controller_layout\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG port_controller_db_source=$controller_db_src\"") != NULL);
+    assert(strstr(file_content, "PMI_GAMECONTROLLERDB_FILE=\"$controller_db_src\" SDL_GAMECONTROLLERCONFIG_FILE=\"$controller_db_src\" bash \"$script_to_run\"") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/bin.tar.gz\" \"$PAK_DIR/bin\"") != NULL);
     assert(strstr(file_content, "unpack_tar \"$PAK_DIR/files/lib.tar.gz\" \"$PAK_DIR/lib\"") != NULL);
     assert(strstr(file_content, "cp -f \"$PAK_DIR/files/libffi.so.7\" \"$PAK_DIR/lib/libffi.so.7\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG runtime_bootstrap_refresh=$lib_bootstrap_stamp\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG runtime_bootstrap_cached=$lib_bootstrap_stamp\"") != NULL);
     assert(strstr(file_content, "if ! command -v pkill >/dev/null 2>&1; then") != NULL);
     assert(strstr(file_content, "cat >\"$PAK_DIR/bin/pkill\" <<'EOF'") != NULL);
     assert(strstr(file_content, "SPRUCE_ARMHF_ROOTFS_IMAGE=\"$PAK_DIR/runtime/armhf/miyoo355_rootfs_32.img\"") != NULL);
@@ -339,6 +521,86 @@ int main(void) {
     assert(strstr(file_content, "ARMHF_LOADER=\"$ARMHF_ROOT/usr/lib/ld-linux-armhf.so.3\"") != NULL);
     assert(strstr(file_content, "export BOX86_LD_LIBRARY_PATH=\"$ARMHF_LIB_PATH${BOX86_LD_LIBRARY_PATH:+:$BOX86_LD_LIBRARY_PATH}\"") != NULL);
     assert(strstr(file_content, "exec \"$ARMHF_LOADER\" --library-path \"$ARMHF_LIB_PATH\" \"$REAL_BOX86\" \"$@\"") != NULL);
+    assert(strstr(file_content, "write_armhf_exec_compat_wrapper()") != NULL);
+    assert(strstr(file_content, "original_path=\"$wrapper_dir/${wrapper_name}.original\"") != NULL);
+    assert(strstr(file_content, "local helper_path=\"$PAK_DIR/bin/pm-armhf-exec-wrapper\"") != NULL);
+    assert(strstr(file_content, "if [ -x \"$helper_path\" ]; then") != NULL);
+    assert(strstr(file_content, "if [ ! -f \"$wrapper_path\" ] || ! cmp -s \"$helper_path\" \"$wrapper_path\" 2>/dev/null; then") != NULL);
+    assert(strstr(file_content, "cp -f \"$helper_path\" \"$wrapper_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN armhf_exec_wrapper_helper_missing=$helper_path\"") != NULL);
+    assert(strstr(file_content, "# PMI_ARMHF_EXEC_COMPAT_WRAPPER=1") != NULL);
+    assert(strstr(file_content, "REAL_BINARY=\"$SELF_DIR/${SELF_NAME}.original\"") != NULL);
+    assert(strstr(file_content, "ARMHF_EXTRA_LIB_PATH=\"$PAK_DIR/runtime/armhf/lib\"") != NULL);
+    assert(strstr(file_content, "for path_entry in ${LD_LIBRARY_PATH:-}; do") != NULL);
+    assert(strstr(file_content, "\"$SELF_DIR\"|\"$SELF_DIR\"/*)") != NULL);
+    assert(strstr(file_content, "ARMHF_EFFECTIVE_LD_LIBRARY_PATH=\"$ARMHF_LIB_PATH${ARMHF_PORT_LIB_PATH:+:$ARMHF_PORT_LIB_PATH}\"") != NULL);
+    assert(strstr(file_content, "exec \"$ARMHF_LOADER\" --argv0 \"$SELF_NAME\" --library-path \"$ARMHF_EFFECTIVE_LD_LIBRARY_PATH\" \"$REAL_BINARY\" \"$@\"") != NULL);
+    assert(strstr(file_content, "launcher_armhf_port_dir()") != NULL);
+    assert(strstr(file_content, "launcher_armhf_port_dir \"$launcher_path\" >/dev/null 2>&1") != NULL);
+    assert(strstr(file_content, "default_sdl2_candidate_path()") != NULL);
+    assert(strstr(file_content, "if [ -n \"${PMI_SDL2_SYSTEM_LIB:-}\" ] && [ -f \"$PMI_SDL2_SYSTEM_LIB\" ]; then") != NULL);
+    assert(strstr(file_content, "strings \"$system_sdl\" 2>/dev/null | grep -qx 'SDL_GetDefaultAudioInfo'") != NULL);
+    assert(strstr(file_content, "port_probe_helper_path()") != NULL);
+    assert(strstr(file_content, "port_probe_cache_path()") != NULL);
+    assert(strstr(file_content, "armhf_probe_cache_path()") != NULL);
+    assert(strstr(file_content, "cleanup_legacy_port_probe_artifacts()") != NULL);
+    assert(strstr(file_content, "refresh_port_probe_cache()") != NULL);
+    assert(strstr(file_content, "armhf_probe_cache_is_stale()") != NULL);
+    assert(strstr(file_content, "refresh_armhf_probe_cache()") != NULL);
+    assert(strstr(file_content, "launcher_aarch64_port_dir()") != NULL);
+    assert(strstr(file_content, "refresh_launcher_index()") != NULL);
+    assert(strstr(file_content, "launcher_index_path()") != NULL);
+    assert(strstr(file_content, "lookup_launcher_metadata()") != NULL);
+    assert(strstr(file_content, "ensure_global_port_repairs()") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG launcher_index_refresh=$index_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG global_port_repairs_refresh=$stamp_path\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG global_port_repairs_cached=$stamp_path\"") != NULL);
+    assert(strstr(file_content, "printf '%s/.pmi-port-probe-v2.tsv\\n' \"$port_dir\"") != NULL);
+    assert(strstr(file_content, "printf '%s/.pmi-armhf-port-probe-v1.tsv\\n' \"$port_dir\"") != NULL);
+    assert(strstr(file_content, "helper=$(port_probe_helper_path)") != NULL);
+    assert(strstr(file_content, "\"$helper\" scan-aarch64-launch-port \"$port_dir\" >\"$tmp_cache\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN port_probe_helper_missing=$helper\"") != NULL);
+    assert(strstr(file_content, "\"$helper\" scan-armhf-launch-port \"$port_dir\" >\"$tmp_cache\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN armhf_probe_helper_missing=$helper\"") != NULL);
+    assert(strstr(file_content, "PMI_POWER_LID_HELPER_PIDFILE=\"/tmp/pmi-power-lid-watch.pid\"") != NULL);
+    assert(strstr(file_content, "power_lid_helper_path()") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper()") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper()") != NULL);
+    assert(strstr(file_content, "helper=$(power_lid_helper_path)") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN power_lid_helper_missing=$helper\"") != NULL);
+    assert(strstr(file_content, "\"$helper\" &") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG power_lid_helper_started=$pid\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG power_lid_helper_stop=$pid\"") != NULL);
+    assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -newer \"$cache_path\"") != NULL);
+    assert(strstr(file_content, "find \"$port_dir/lib\" -maxdepth 2 -type f") != NULL);
+    assert(strstr(file_content, "maybe_refresh_aarch64_sdl_compat_binary_from_probe()") != NULL);
+    assert(strstr(file_content, "local needs_pulse_simple=\"${needs_pulse_simple_field#needs_pulse_simple=}\"") != NULL);
+    assert(strstr(file_content, "local needs_default_audio_info=\"${needs_default_audio_info_field#needs_default_audio_info=}\"") != NULL);
+    assert(strstr(file_content, "default_pulse_simple_candidate_path()") != NULL);
+    assert(strstr(file_content, "default_pulse_simple_available()") != NULL);
+    assert(strstr(file_content, "if [ -n \"${PMI_PULSE_SIMPLE_SYSTEM_LIB:-}\" ] && [ -f \"$PMI_PULSE_SIMPLE_SYSTEM_LIB\" ]; then") != NULL);
+    assert(strstr(file_content, "head -n 2 \"$file\" 2>/dev/null | grep -Eq '^# PMI_AARCH64_(SDL_COMPAT|NATIVE_COMPAT)_WRAPPER=1$'") != NULL);
+    assert(strstr(file_content, "write_aarch64_sdl_compat_wrapper()") != NULL);
+    assert(strstr(file_content, "# PMI_AARCH64_NATIVE_COMPAT_WRAPPER=1") != NULL);
+    assert(strstr(file_content, "AARCH64_SDL_RUNTIME_LIB=\"\\$PAK_DIR/runtime/aarch64/lib\"") != NULL);
+    assert(strstr(file_content, "AARCH64_PULSE_RUNTIME_LIB=\"\\$PAK_DIR/runtime/aarch64/pulse\"") != NULL);
+    assert(strstr(file_content, "PMI_USE_AARCH64_PULSE_COMPAT=\"$use_pulse\"") != NULL);
+    assert(strstr(file_content, "PMI_ORIG_PLAYBACK_PATH=\\$(amixer sget \"Playback Path\" 2>/dev/null") != NULL);
+    assert(strstr(file_content, "amixer sset \"Playback Path\" OFF >/dev/null 2>&1 || true") != NULL);
+    assert(strstr(file_content, "amixer sset Speaker on >/dev/null 2>&1 || true") != NULL);
+    assert(strstr(file_content, "if [ \"\\$PMI_USE_AARCH64_PULSE_COMPAT\" = \"1\" ]; then") != NULL);
+    assert(strstr(file_content, "export LD_LIBRARY_PATH=\"\\$COMPAT_LD_LIBRARY_PATH\\${LD_LIBRARY_PATH:+:\\$LD_LIBRARY_PATH}\"") != NULL);
+    assert(strstr(file_content, "load_aarch64_port_probe_state()") != NULL);
+    assert(strstr(file_content, "process_aarch64_sdl_compat_for_port()") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_wrappers()") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_for_launcher()") != NULL);
+    assert(strstr(file_content, "if ! port_dir=$(launcher_aarch64_port_dir \"$launcher_path\"); then") != NULL);
+    assert(strstr(file_content, "load_aarch64_port_probe_state \"$port_dir\" || return 0") != NULL);
+    assert(strstr(file_content, "done < \"$PMI_AARCH64_PROBE_CACHE_PATH\"") != NULL);
+    assert(strstr(file_content, "maybe_refresh_aarch64_sdl_compat_binary_from_probe \"$record_path\" \"$field1\" \"$field2\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN aarch64_sdl_compat_missing=$runtime_sdl\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_WARN aarch64_pulse_compat_missing=$runtime_pulse_dir\"") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG aarch64_native_compat_applied=$binary_path sdl=$use_sdl pulse=$use_pulse\"") != NULL);
     assert(strstr(file_content, "self_pid=\"$$\"") != NULL);
     assert(strstr(file_content, "pgrep -f \"$pattern\" | while IFS= read -r pid || [ -n \"$pid\" ]; do") != NULL);
     assert(strstr(file_content, "[ \"$pid\" = \"$self_pid\" ] && continue") != NULL);
@@ -359,6 +621,10 @@ int main(void) {
     assert(strstr(file_content, "if port_has_arch \"$port_json\" \"armhf\" || grep -q 'PORT_32BIT=Y' \"$launcher_path\" 2>/dev/null; then") != NULL);
     assert(strstr(file_content, "launcher_requires_armhf()") != NULL);
     assert(strstr(file_content, "bind_flip_libmali()") != NULL);
+    assert(strstr(file_content, "launcher_requires_system_gl_stack()") != NULL);
+    assert(strstr(file_content, "PMI_AARCH64_PROBE_HAS_BUNDLED_NATIVE_GL=0") != NULL);
+    assert(strstr(file_content, "PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL=0") != NULL);
+    assert(strstr(file_content, "[ \"$PMI_AARCH64_PROBE_NEEDS_SYSTEM_GL\" = \"1\" ]") != NULL);
     assert(strstr(file_content, "local source_lib=\"$PAK_DIR/files/libmali-g2p0.so.1.9.0\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_WARN flip_libmali_missing=$source_lib\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG flip_libmali_bound=/usr/lib/libmali.so.1.9.0\"") != NULL);
@@ -369,16 +635,42 @@ int main(void) {
     assert(strstr(file_content, "write_artwork_png \"$artwork_file\" \"$dest_file\"") != NULL);
     assert(strstr(file_content, "copy_game_scripts") != NULL);
     assert(strstr(file_content, "write_game_wrapper()") != NULL);
+    assert(strstr(file_content, "head -n 8 \"$wrapper_path\" 2>/dev/null | grep -q '^# PMI_PORTMASTER_LAUNCHER_WRAPPER=1$' || return 1") != NULL);
     assert(strstr(file_content, "write_box64_wrapper()") != NULL);
     assert(strstr(file_content, "refresh_box_runtime_wrappers()") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type f \\( -path '*/box86/box86' -o -path '*/box64/box64' \\)") != NULL);
     assert(strstr(file_content, "write_box86_compat_wrapper \"$file\"") != NULL);
     assert(strstr(file_content, "write_box64_wrapper \"$file\"") != NULL);
+    assert(strstr(file_content, "process_armhf_binary_wrappers_for_port()") != NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers()") != NULL);
+    assert(strstr(file_content, "for port_json in \"$search_path\"/*/port.json; do") != NULL);
+    assert(strstr(file_content, "port_has_arch \"$port_json\" \"armhf\" || continue") != NULL);
+    assert(strstr(file_content, "if refresh_armhf_probe_cache \"$port_dir\"; then") != NULL);
+    assert(strstr(file_content, "cache_path=$(armhf_probe_cache_path \"$port_dir\")") != NULL);
+    assert(strstr(file_content, "while IFS=\"$(printf '\\t')\" read -r record_type record_path field1") != NULL);
+    assert(strstr(file_content, "write_armhf_exec_compat_wrapper \"$record_path\"") != NULL);
+    assert(strstr(file_content, "find \"$port_dir\" -maxdepth 2 -type f -perm -111") != NULL);
+    assert(strstr(file_content, "set -- $(dd if=\"$file\" bs=1 count=20 2>/dev/null | od -An -tx1 -v 2>/dev/null)") != NULL);
+    assert(strstr(file_content, "[ \"${19}\" = \"28\" ] || continue") != NULL);
+    assert(strstr(file_content, "write_armhf_exec_compat_wrapper \"$file\"") != NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers_for_launcher()") != NULL);
+    assert(strstr(file_content, "if ! port_dir=$(launcher_armhf_port_dir \"$launcher_path\"); then") != NULL);
+    assert(strstr(file_content, "process_aarch64_sdl_compat_for_port \"$port_dir\"") != NULL);
     assert(strstr(file_content, "seed_x86_runtime_libs()") != NULL);
     assert(strstr(file_content, "local runtime_dir=\"$PAK_DIR/lib/box64-i386-linux-gnu\"") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type d -path '*/gamedata/*/32/lib'") != NULL);
     assert(strstr(file_content, "[ -f \"$lib_dir/libstdc++.so.6\" ] || cp -f \"$runtime_dir/libstdc++.so.6\" \"$lib_dir/\"") != NULL);
     assert(strstr(file_content, "[ -f \"$lib_dir/libgcc_s.so.1\" ] || cp -f \"$runtime_dir/libgcc_s.so.1\" \"$lib_dir/\"") != NULL);
+    assert(strstr(file_content, "local checker=\"$PAK_DIR/bin/pm-sdl-compat-check\"") == NULL);
+    assert(strstr(file_content, "sdl_compat_check_cache_path()") == NULL);
+    assert(strstr(file_content, "write_sdl_compat_check_cache()") == NULL);
+    assert(strstr(file_content, "binary_uses_sdl_gl_windowing()") == NULL);
+    assert(strstr(file_content, "port_has_bundled_native_gl_stack()") == NULL);
+    assert(strstr(file_content, "is_elf64_file()") == NULL);
+    assert(strstr(file_content, "is_probe_cache_artifact()") == NULL);
+    assert(strstr(file_content, "is_aarch64_launch_probe_candidate()") == NULL);
+    assert(strstr(file_content, "cleanup_port_probe_artifacts()") == NULL);
+    assert(strstr(file_content, "list_port_aarch64_launch_probe_candidates()") == NULL);
     assert(strstr(file_content, "export PMI_PORT_SCRIPT=\"$target_script\"") != NULL);
     assert(strstr(file_content, "exec \"$PAK_DIR/launch.sh\" \"$wrapper_path\"") != NULL);
     assert(strstr(file_content, "process_squashfs_files") != NULL);
@@ -390,10 +682,24 @@ int main(void) {
     assert(strstr(file_content, "systemctl >/dev/null 2>\\&1; then $ESUDO systemctl restart oga_events \\& fi") != NULL);
     assert(strstr(file_content, "local source_script=\"${PMI_PORT_SCRIPT:-$ROM_PATH}\"") != NULL);
     assert(strstr(file_content, "apply_port_arch_rewrites") != NULL);
-    assert(strstr(file_content, "if launcher_requires_armhf \"$source_script\"; then") != NULL);
-    assert(strstr(file_content, "seed_x86_runtime_libs \"$REAL_PORTS_DIR\"") != NULL);
+    assert(strstr(file_content, "ensure_global_port_repairs") != NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers \"$REAL_PORTS_DIR\"") == NULL);
+    assert(strstr(file_content, "refresh_armhf_binary_wrappers_for_launcher \"$source_script\"") != NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_wrappers \"$REAL_PORTS_DIR\"") == NULL);
+    assert(strstr(file_content, "refresh_aarch64_sdl_compat_for_launcher \"$source_script\"") != NULL);
+    assert(strstr(file_content, "if armhf_port_dir=$(launcher_armhf_port_dir \"$source_script\"); then") != NULL);
+    assert(strstr(file_content, "seed_x86_runtime_libs \"$armhf_port_dir\"") != NULL);
     assert(strstr(file_content, "bind_flip_libmali") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper\n\n    while true; do") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper\n    post_gui_rewrites") != NULL);
+    assert(strstr(file_content, "if launcher_requires_system_gl_stack \"$source_script\"; then") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG system_gl_stack_launcher=$source_script\"") != NULL);
+    assert(strstr(file_content, "PMI_LD_LIBRARY_STRATEGY=system-gl bash \"$script_to_run\"") != NULL);
+    assert(strstr(file_content, "start_power_lid_helper\n    if launcher_requires_system_gl_stack \"$source_script\"; then") != NULL);
+    assert(strstr(file_content, "stop_power_lid_helper\n}") != NULL);
     assert(strstr(file_content, "stage_launch_script") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG staged_launch_reused=$staged_script\" >&2") != NULL);
+    assert(strstr(file_content, "echo \"PMI_DIAG staged_launch_refreshed=$staged_script\" >&2") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG selected_port_script=$source_script\"") != NULL);
     assert(strstr(file_content, "echo \"PMI_DIAG rewritten_launch_path=$script_to_run\"") != NULL);
     assert(strstr(file_content, "if [ \"${PMI_TEST_MODE:-}\" = \"overlay-sync\" ]; then") != NULL);
@@ -435,20 +741,31 @@ int main(void) {
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pugwash", payload_dir);
     assert(read_text_file_alloc(file_path, &file_content, &file_len) == 0);
     assert(strstr(file_content, "def portmaster_check_update(pm, config, temp_dir):\n    return False\n") != NULL);
+    assert(strstr(file_content, "def start_artwork_warmup(self):") != NULL);
+    assert(strstr(file_content, "self.images.warmup_jpeg_directory(images_dir)") != NULL);
+    assert(strstr(file_content, "def poll_artwork_cache_updates(self):") != NULL);
+    assert(strstr(file_content, "completed = self.images.poll_completed_jpegs()") != NULL);
+    assert(strstr(file_content, "pm.start_artwork_warmup()") != NULL);
+    assert(strstr(file_content, "self.poll_artwork_cache_updates()") != NULL);
     free(file_content);
     file_content = NULL;
 
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/pylibs/pySDL2gui.py", payload_dir);
     assert(read_text_file_alloc(file_path, &file_content, &file_len) == 0);
     assert(strstr(file_content, "def resolve_image_path(self, res_filename):") != NULL);
-    assert(strstr(file_content, "res_path = os.fspath(res_filename)") != NULL);
-    assert(strstr(file_content, "converter = os.environ.get(\"PMI_ARTWORK_CONVERTER\", \"pm-artwork-convert\")") != NULL);
-    assert(strstr(file_content, "cached_name = f\"{res_path}.pm.png\"") != NULL);
-    assert(strstr(file_content, "subprocess.run([converter, res_path, cached_name], check=True,") != NULL);
+    assert(strstr(file_content, "self.jpeg_cache_root = Path(os.environ.get(\"XDG_CACHE_HOME\", str(Path.home() / \".cache\"))) / \"PortMaster\" / \"jpeg-cache\"") != NULL);
+    assert(strstr(file_content, "self.jpeg_high_priority = queue.Queue()") != NULL);
+    assert(strstr(file_content, "def _queue_jpeg_conversion(self, source_path, *, high_priority):") != NULL);
+    assert(strstr(file_content, "def warmup_jpeg_directory(self, directory):") != NULL);
+    assert(strstr(file_content, "def poll_completed_jpegs(self):") != NULL);
+    assert(strstr(file_content, "self._queue_jpeg_conversion(source_path, high_priority=True)") != NULL);
+    assert(strstr(file_content, "return str(cached_path)") != NULL);
     assert(strstr(file_content, "res_filename = self.resolve_image_path(res_filename)") != NULL);
     assert(strstr(file_content, "return self.images.get(\"NO_IMAGE\", None)") != NULL);
     assert(strstr(file_content, "except Exception:\n                if filename != \"NO_IMAGE\":") != NULL);
     assert(strstr(file_content, "except Exception:\n            stored_name = data.get(\"name\", file_name)") != NULL);
+    assert(strstr(file_content, "cached_name = f\"{res_path}.pm.png\"") == NULL);
+    assert(strstr(file_content, "subprocess.run([converter, res_path, cached_name], check=True,") == NULL);
     free(file_content);
     file_content = NULL;
 
@@ -467,5 +784,8 @@ int main(void) {
     file_content = NULL;
 
     assert(install_files_present(&layout) == 1);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/lib/libbz2.so.1.0", payload_dir);
+    assert(unlink(file_path) == 0);
+    assert(install_files_present(&layout) == 0);
     return 0;
 }

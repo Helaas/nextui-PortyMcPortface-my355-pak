@@ -11,11 +11,15 @@ export controlfolder="$runtime_root"
 
 export directory="$TEMP_DATA_DIR"
 export PATH="${runtime_root%/PortMaster}/bin:$PATH"
-export LD_LIBRARY_PATH="${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ "${PMI_LD_LIBRARY_STRATEGY:-}" = "system-gl" ]; then
+  export LD_LIBRARY_PATH="/usr/lib:/usr/trimui/lib:${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 export ESUDO=""
 export ESUDOKILL="-1"
-export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+export SDL_GAMECONTROLLERCONFIG_FILE="${PMI_GAMECONTROLLERDB_FILE:-$controlfolder/gamecontrollerdb.txt}"
 
 get_controls() {
   LOWRES="N"
