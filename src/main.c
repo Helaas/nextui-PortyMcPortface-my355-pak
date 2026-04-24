@@ -164,7 +164,7 @@ int main(void) {
                 int settings_index = selected_index;
                 controller_layout settings_layout = current_controller_layout;
 
-                if (show_settings_screen(releases, (int)release_count, selected_index, current_controller_layout,
+                if (show_settings_screen(&layout, releases, (int)release_count, selected_index, current_controller_layout,
                         &settings_index, &settings_layout) == AP_OK) {
                     if (save_controller_layout(&layout, settings_layout) != 0) {
                         show_message_box("Could not save controller layout.");

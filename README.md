@@ -70,8 +70,9 @@ Settings screen:
 - `UP/DOWN` changes the focused setting row.
 - `LEFT/RIGHT` changes the focused setting value.
 - `PortMaster Version` cycles through available releases directly on the settings screen.
-- `Controller Layout` switches between `X360` and `Nintendo`.
-- `START SAVE` commits both staged settings.
+- `Global Controller Layout` switches between `X360` and `Nintendo`.
+- `A OPEN` on **Port Layouts** opens the per-port layout screen.
+- `START SAVE` commits staged settings on the current screen.
 - `B BACK` exits Settings without saving staged changes.
 
 > [!WARNING]
@@ -84,10 +85,12 @@ Settings screen:
 
 Porty McPortface defaults to the Spruce-style X360 button mapping for PortMaster ports.
 
-- Open **Settings** from Porty McPortface to switch between `X360` and `Nintendo`.
-- The selected layout is applied automatically the next time you launch a port.
+- Open **Settings** from Porty McPortface and use **Global Controller Layout** to switch the default between `X360` and `Nintendo`.
+- Use **Port Layouts** to set an installed port to `Follow Global`, `X360`, or `Nintendo`.
+- The selected global or per-port layout is applied automatically the next time you launch a port.
 - The PortMaster GUI itself always keeps the default X360 mapping; the Nintendo layout is only passed to launched ports.
-- Advanced/manual toggle: creating `/.userdata/my355/PORTS-portmaster/nintendo` enables Nintendo layout; deleting that file returns to X360.
+- Advanced/manual global toggle: creating `/.userdata/my355/PORTS-portmaster/nintendo` enables Nintendo layout; deleting that file returns to X360.
+- Advanced/manual per-port override: write `x360` or `nintendo` to `/.userdata/my355/PORTS-portmaster/controller-layouts/<launcher>.layout`, where `<launcher>` is the installed `.ports` launcher filename such as `AM2R.sh`. Delete the file to return that port to `Follow Global`.
 
 ## Updating
 

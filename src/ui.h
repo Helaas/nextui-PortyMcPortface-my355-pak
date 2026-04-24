@@ -20,7 +20,7 @@ typedef enum {
 
 int run_updater_ui(const status_model *model, ui_updater_choice *choice);
 int show_unsupported_warning(const char *message, ui_warning_choice *choice);
-int show_settings_screen(const remote_metadata *releases, int count,
+int show_settings_screen(const install_layout *layout, const remote_metadata *releases, int count,
     int current_index, controller_layout current_layout,
     int *selected_index, controller_layout *selected_layout);
 int show_message_box(const char *message);

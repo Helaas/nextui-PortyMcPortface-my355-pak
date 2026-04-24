@@ -241,8 +241,76 @@ active_controller_layout_sentinel() {
     find "$sentinel_root" -maxdepth 1 -type f -iname 'nintendo*' | head -n 1
 }
 
+controller_layout_overrides_dir() {
+    local sentinel_root
+
+    sentinel_root=$(controller_layout_root)
+    [ -n "$sentinel_root" ] || return 0
+    printf '%s/controller-layouts\n' "$sentinel_root"
+}
+
+controller_layout_override_path_for_launcher() {
+    local launcher_path="$1"
+    local launcher_name
+    local override_dir
+
+    launcher_name=$(basename "$launcher_path")
+    case "$launcher_name" in
+        ""|"."|".."|*/*)
+            return 1
+            ;;
+    esac
+    override_dir=$(controller_layout_overrides_dir)
+    [ -n "$override_dir" ] || return 1
+    printf '%s/%s.layout\n' "$override_dir" "$launcher_name"
+}
+
+active_controller_layout_override_path() {
+    local launcher_path="${1:-}"
+    local override_path
+    local requested
+
+    [ -n "$launcher_path" ] || return 0
+    override_path=$(controller_layout_override_path_for_launcher "$launcher_path") || return 0
+    [ -f "$override_path" ] || return 0
+    requested=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$override_path" | tr '[:upper:]' '[:lower:]')
+    case "$requested" in
+        x360|xbox|nintendo)
+            printf '%s\n' "$override_path"
+            ;;
+    esac
+}
+
+active_controller_layout_override() {
+    local launcher_path="${1:-}"
+    local override_path
+    local requested
+
+    override_path=$(active_controller_layout_override_path "$launcher_path")
+    [ -n "$override_path" ] || return 1
+    requested=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$override_path" | tr '[:upper:]' '[:lower:]')
+    case "$requested" in
+        nintendo)
+            printf 'nintendo\n'
+            ;;
+        x360|xbox)
+            printf 'xbox\n'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 requested_controller_layout() {
+    local launcher_path="${1:-}"
+    local override_layout
     local sentinel_path
+
+    if override_layout=$(active_controller_layout_override "$launcher_path"); then
+        printf '%s\n' "$override_layout"
+        return 0
+    fi
 
     sentinel_path=$(active_controller_layout_sentinel)
     if [ -n "$sentinel_path" ]; then
@@ -259,7 +327,7 @@ default_controller_db_source() {
 active_controller_db_source() {
     local requested_layout
 
-    requested_layout=$(requested_controller_layout)
+    requested_layout=$(requested_controller_layout "${1:-}")
     if [ "$requested_layout" = "nintendo" ] && [ -f "$PAK_DIR/files/gamecontrollerdb_nintendo.txt" ]; then
         printf '%s/files/gamecontrollerdb_nintendo.txt\n' "$PAK_DIR"
     else
@@ -268,7 +336,7 @@ active_controller_db_source() {
 }
 
 active_controller_layout() {
-    case "$(active_controller_db_source)" in
+    case "$(active_controller_db_source "${1:-}")" in
         */gamecontrollerdb_nintendo.txt)
             printf 'nintendo\n'
             ;;
@@ -1882,6 +1950,7 @@ launch_port_script() {
     local armhf_port_dir
     local controller_db_src
     local controller_layout
+    local override_path
     local sentinel_path
 
     ensure_global_port_repairs
@@ -1890,11 +1959,14 @@ launch_port_script() {
     script_to_run=$(stage_launch_script "$source_script")
     echo "PMI_DIAG selected_port_script=$source_script"
     echo "PMI_DIAG rewritten_launch_path=$script_to_run"
-    controller_db_src=$(active_controller_db_source)
-    controller_layout=$(active_controller_layout)
+    controller_db_src=$(active_controller_db_source "$source_script")
+    controller_layout=$(active_controller_layout "$source_script")
+    override_path=$(active_controller_layout_override_path "$source_script")
     sentinel_path=$(active_controller_layout_sentinel)
     echo "PMI_DIAG port_controller_layout=$controller_layout"
-    if [ -n "$sentinel_path" ]; then
+    if [ -n "$override_path" ]; then
+        echo "PMI_DIAG port_controller_layout_override=$override_path"
+    elif [ -n "$sentinel_path" ]; then
         echo "PMI_DIAG port_controller_layout_sentinel=$sentinel_path"
     fi
     echo "PMI_DIAG port_controller_db_source=$controller_db_src"
