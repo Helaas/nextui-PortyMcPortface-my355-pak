@@ -545,6 +545,57 @@ EOF
 	fi
 }
 
+add_soh_fixture() {
+	root="$1"
+	real_ports_dir="$root/Roms/Ports (PORTS)/.ports"
+	port_dir="$real_ports_dir/soh"
+
+	mkdir -p "$port_dir/baseroms"
+	mkdir -p "$root/.ports_temp/ports"
+	ln -s "$port_dir" "$root/.ports_temp/ports/soh"
+
+	cat >"$real_ports_dir/Ship of Harkinian.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+source "$EMU_DIR/control.txt"
+GAMEDIR="/$directory/ports/soh"
+cd "$GAMEDIR"
+
+otr_check() {
+    if [ ! -f "oot.o2r" ] && [ ! -f "oot-mq.o2r" ]; then
+        if ls "$GAMEDIR/baseroms/"*.*64 1> /dev/null 2>&1; then
+            printf 'generated-o2r\n' >"$GAMEDIR/baseroms/oot.o2r"
+        else
+            exit 1
+        fi
+
+        # Check if OTR files were generated
+        if [ ! -f "oot.o2r" ] && [ ! -f "oot-mq.o2r" ]; then
+            exit 2
+        fi
+    fi
+}
+
+otr_check
+printf 'soh-ok\n' >"$TEMP_DATA_DIR/soh-result.txt"
+EOF
+	chmod +x "$real_ports_dir/Ship of Harkinian.sh"
+
+	cat >"$port_dir/port.json" <<'EOF'
+{
+  "attr": {
+    "arch": ["aarch64"]
+  },
+  "files": {
+    "Ship of Harkinian.sh": "Ship of Harkinian.sh",
+    "soh/": "soh/"
+  }
+}
+EOF
+
+	printf 'rom\n' >"$port_dir/baseroms/rom1.z64"
+}
+
 failure_root="$(mktemp -d)"
 success_root="$(mktemp -d)"
 joy_override_root="$(mktemp -d)"
@@ -556,7 +607,8 @@ native_gl_root="$(mktemp -d)"
 bundled_gl_root="$(mktemp -d)"
 multi_port_root="$(mktemp -d)"
 gui_cleanup_root="$(mktemp -d)"
-trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root" "$multi_port_root" "$gui_cleanup_root"' EXIT
+soh_root="$(mktemp -d)"
+trap 'rm -rf "$failure_root" "$success_root" "$joy_override_root" "$joy_passthrough_root" "$joy_readonly_root" "$aarch64_wrap_root" "$aarch64_skip_root" "$native_gl_root" "$bundled_gl_root" "$multi_port_root" "$gui_cleanup_root" "$soh_root"' EXIT
 
 create_direct_launch_tree "$failure_root"
 printf 'not-a-tarball\n' >"$failure_root/Emus/my355/PORTS.pak/files/lib.tar.gz"
@@ -838,6 +890,15 @@ PMI_SDL2_SYSTEM_LIB='' PMI_TEST_PORT_PROBE_LOG="$bundled_gl_root/port-probe.log"
 ! grep -q 'PMI_DIAG system_gl_stack_launcher=' "$bundled_gl_root/PORTS.txt"
 grep -q "^$bundled_gl_root/.ports_temp/ports/bundledgl/lib/libarm64:$bundled_gl_root/Emus/my355/PORTS.pak/lib$" "$bundled_gl_root/.ports_temp/bundled-gl-ld.txt"
 test "$(wc -l < "$bundled_gl_root/port-probe.log" | tr -d ' ')" = "1"
+
+create_direct_launch_tree "$soh_root"
+add_soh_fixture "$soh_root"
+PMI_TEST_PORT_PROBE_LOG="$soh_root/port-probe.log" run_direct_launch_for_script "$soh_root" "Ship of Harkinian.sh"
+grep -qx 'soh-ok' "$soh_root/.ports_temp/soh-result.txt"
+grep -qx 'generated-o2r' "$soh_root/Roms/Ports (PORTS)/.ports/soh/baseroms/oot.o2r"
+grep -qx 'generated-o2r' "$soh_root/Roms/Ports (PORTS)/.ports/soh/oot.o2r"
+grep -q 'PMI_SOH_O2R_SYNC=1' "$(staged_launch_path_for "$soh_root" "Ship of Harkinian.sh")"
+test "$(wc -l < "$soh_root/port-probe.log" | tr -d ' ')" = "1"
 
 create_direct_launch_tree "$multi_port_root"
 add_aarch64_sdl_fixture "$multi_port_root"

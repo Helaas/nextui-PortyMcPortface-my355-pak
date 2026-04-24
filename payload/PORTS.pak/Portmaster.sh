@@ -660,6 +660,44 @@ heal_installed_port_launchers() {
     done
 }
 
+patch_ship_of_harkinian_staged_launcher() {
+    local source_script="$1"
+    local staged_script="$2"
+    local tmp_script
+
+    [ "$(basename "$source_script")" = "Ship of Harkinian.sh" ] || return 0
+    [ -f "$staged_script" ] || return 0
+    grep -q 'oot.o2r' "$staged_script" 2>/dev/null || return 0
+    grep -q 'PMI_SOH_O2R_SYNC=1' "$staged_script" 2>/dev/null && return 0
+
+    tmp_script="${staged_script}.pmi-soh.$$"
+    if awk '
+        {
+            print
+            if ($0 == "otr_check() {") {
+                print "    soh_sync_o2r_files() {"
+                print "        # PMI_SOH_O2R_SYNC=1"
+                print "        local o2r_file target_o2r"
+                print "        for o2r_file in \"$GAMEDIR/baseroms/oot.o2r\" \"$GAMEDIR/baseroms/oot-mq.o2r\"; do"
+                print "            [ -f \"$o2r_file\" ] || continue"
+                print "            target_o2r=\"$GAMEDIR/$(basename \"$o2r_file\")\""
+                print "            if [ ! -f \"$target_o2r\" ] || [ \"$o2r_file\" -nt \"$target_o2r\" ]; then"
+                print "                cp -f \"$o2r_file\" \"$target_o2r\" 2>/dev/null || true"
+                print "            fi"
+                print "        done"
+                print "    }"
+                print "    soh_sync_o2r_files"
+            } else if ($0 ~ /# Check if OTR files were generated/) {
+                print "        soh_sync_o2r_files"
+            }
+        }
+    ' "$staged_script" >"$tmp_script"; then
+        mv -f "$tmp_script" "$staged_script"
+    else
+        rm -f "$tmp_script" 2>/dev/null || true
+    fi
+}
+
 stage_launch_script() {
     local source_script="$1"
     local staged_dir="$TEMP_DATA_DIR/launchers"
@@ -678,6 +716,7 @@ stage_launch_script() {
     else
         cp -f "$source_script" "$staged_script"
         rewrite_script_file "$staged_script"
+        patch_ship_of_harkinian_staged_launcher "$source_script" "$staged_script"
         chmod +x "$staged_script" 2>/dev/null || true
         echo "PMI_DIAG staged_launch_refreshed=$staged_script" >&2
     fi
