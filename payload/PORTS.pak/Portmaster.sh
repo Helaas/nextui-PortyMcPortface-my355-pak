@@ -1736,6 +1736,7 @@ managed_game_wrapper_source() {
     local source_script
 
     [ -f "$wrapper_path" ] || return 1
+    head -n 8 "$wrapper_path" 2>/dev/null | grep -q '^# PMI_PORTMASTER_LAUNCHER_WRAPPER=1$' || return 1
     source_script=$(sed -n 's|^export PMI_PORT_SCRIPT="\(.*\)"$|\1|p' "$wrapper_path" | head -n 1)
     [ -n "$source_script" ] || return 1
     grep -q 'launch\.sh' "$wrapper_path" 2>/dev/null || return 1

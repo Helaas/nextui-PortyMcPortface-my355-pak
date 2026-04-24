@@ -23,6 +23,17 @@ static void assert_text_file_equals(const char *path, const char *expected) {
     (void)len;
 }
 
+static void assert_control_keeps_runtime_libs_for_system_gl(const char *path) {
+    char *content = NULL;
+    size_t len = 0;
+
+    assert(read_text_file_alloc(path, &content, &len) == 0);
+    assert(strstr(content, "if [ \"${PMI_LD_LIBRARY_STRATEGY:-}\" = \"system-gl\" ]; then") != NULL);
+    assert(strstr(content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib:${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
+    free(content);
+    (void)len;
+}
+
 int main(void) {
     char root_template[] = "/tmp/pm-installer-test-XXXXXX";
     char *root = mkdtemp(root_template);
@@ -256,6 +267,10 @@ int main(void) {
     assert(write_text_file(file_path, "rootfs-ab") == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/miyoo355_rootfs_32.img_partac");
     assert(write_text_file(file_path, "rootfs-ac") == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/lib");
+    assert(fs_ensure_dir(file_path) == 0);
+    join_path(file_path, sizeof(file_path), runtime_tools_dir, "armhf/lib/libbz2.so.1.0");
+    assert(write_text_file(file_path, "armhf-bzip2") == 0);
     snprintf(file_path, sizeof(file_path), "%s/box64-i386-linux-gnu", runtime_tools_dir);
     assert(fs_ensure_dir(file_path) == 0);
     join_path(file_path, sizeof(file_path), runtime_tools_dir, "box64-i386-linux-gnu/libstdc++.so.6");
@@ -363,10 +378,14 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/files/libffi.so.7", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/files/control.txt", payload_dir);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/control.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/miyoo/control.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
+    assert_control_keeps_runtime_libs_for_system_gl(file_path);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/PortMaster.txt", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/PortMaster/PortMaster.sh", payload_dir);
@@ -397,6 +416,8 @@ int main(void) {
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/miyoo355_rootfs_32.img_partac", payload_dir);
     assert(stat(file_path, &st) == 0);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/lib/libbz2.so.1.0", payload_dir);
+    assert_text_file_equals(file_path, "armhf-bzip2");
     snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/lib/libSDL2-2.0.so.0", payload_dir);
     assert(stat(file_path, &st) == 0);
     snprintf(file_path, sizeof(file_path), "%s/runtime/aarch64/pulse/libpulse-simple.so.0", payload_dir);
@@ -444,7 +465,7 @@ int main(void) {
     assert(strstr(file_content, "log_control_diagnostics()") == NULL);
     assert(strstr(file_content, "export PATH=\"${runtime_root%/PortMaster}/bin:$PATH\"") != NULL);
     assert(strstr(file_content, "if [ \"${PMI_LD_LIBRARY_STRATEGY:-}\" = \"system-gl\" ]; then") != NULL);
-    assert(strstr(file_content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib\"") != NULL);
+    assert(strstr(file_content, "export LD_LIBRARY_PATH=\"/usr/lib:/usr/trimui/lib:${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
     assert(strstr(file_content, "export LD_LIBRARY_PATH=\"${runtime_root%/PortMaster}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"") != NULL);
     assert(strstr(file_content, "PMI_GAMECONTROLLERDB_FILE:-$controlfolder/gamecontrollerdb.txt") != NULL);
     assert(strstr(file_content, "SDL_GAMECONTROLLERCONFIG=") == NULL);
@@ -614,6 +635,7 @@ int main(void) {
     assert(strstr(file_content, "write_artwork_png \"$artwork_file\" \"$dest_file\"") != NULL);
     assert(strstr(file_content, "copy_game_scripts") != NULL);
     assert(strstr(file_content, "write_game_wrapper()") != NULL);
+    assert(strstr(file_content, "head -n 8 \"$wrapper_path\" 2>/dev/null | grep -q '^# PMI_PORTMASTER_LAUNCHER_WRAPPER=1$' || return 1") != NULL);
     assert(strstr(file_content, "write_box64_wrapper()") != NULL);
     assert(strstr(file_content, "refresh_box_runtime_wrappers()") != NULL);
     assert(strstr(file_content, "find \"$search_path\" -type f \\( -path '*/box86/box86' -o -path '*/box64/box64' \\)") != NULL);
@@ -762,5 +784,8 @@ int main(void) {
     file_content = NULL;
 
     assert(install_files_present(&layout) == 1);
+    snprintf(file_path, sizeof(file_path), "%s/runtime/armhf/lib/libbz2.so.1.0", payload_dir);
+    assert(unlink(file_path) == 0);
+    assert(install_files_present(&layout) == 0);
     return 0;
 }

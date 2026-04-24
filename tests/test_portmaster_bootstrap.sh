@@ -202,7 +202,7 @@ export controlfolder="\$runtime_root"
 export directory="${temp_data_dir#/}"
 export PATH="\${runtime_root%/PortMaster}/bin:\$PATH"
 if [ "\${PMI_LD_LIBRARY_STRATEGY:-}" = "system-gl" ]; then
-  export LD_LIBRARY_PATH="/usr/lib:/usr/trimui/lib"
+  export LD_LIBRARY_PATH="/usr/lib:/usr/trimui/lib:\${runtime_root%/PortMaster}/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 else
   export LD_LIBRARY_PATH="\${runtime_root%/PortMaster}/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 fi
@@ -800,7 +800,7 @@ create_direct_launch_tree "$native_gl_root"
 add_native_gl_fixture "$native_gl_root" "TestNativeGL.sh" "nativegl" "native-gl-ld.txt" 0
 PMI_SDL2_SYSTEM_LIB='' PMI_TEST_PORT_PROBE_LOG="$native_gl_root/port-probe.log" run_direct_launch_for_script "$native_gl_root" "TestNativeGL.sh"
 grep -q "PMI_DIAG system_gl_stack_launcher=$native_gl_root/Roms/Ports (PORTS)/.ports/TestNativeGL.sh" "$native_gl_root/PORTS.txt"
-grep -q "^$native_gl_root/.ports_temp/ports/nativegl/lib/libarm64:/usr/lib:/usr/trimui/lib$" "$native_gl_root/.ports_temp/native-gl-ld.txt"
+grep -q "^$native_gl_root/.ports_temp/ports/nativegl/lib/libarm64:/usr/lib:/usr/trimui/lib:$native_gl_root/Emus/my355/PORTS.pak/lib$" "$native_gl_root/.ports_temp/native-gl-ld.txt"
 test "$(wc -l < "$native_gl_root/port-probe.log" | tr -d ' ')" = "1"
 
 create_direct_launch_tree "$bundled_gl_root"

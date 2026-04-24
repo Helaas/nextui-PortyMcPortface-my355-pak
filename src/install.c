@@ -295,16 +295,19 @@ int install_files_present(const install_layout *layout) {
     char runtime_launch[PATH_MAX];
     char pugwash_path[PATH_MAX];
     char armhf_rootfs_partaa[PATH_MAX];
+    char armhf_libbz2[PATH_MAX];
 
     snprintf(runtime_launch, sizeof(runtime_launch), "%s/launch.sh", layout->payload_pak_dir);
     snprintf(pugwash_path, sizeof(pugwash_path), "%s/PortMaster/pugwash", layout->payload_pak_dir);
     snprintf(armhf_rootfs_partaa, sizeof(armhf_rootfs_partaa), "%s/runtime/armhf/miyoo355_rootfs_32.img_partaa", layout->payload_pak_dir);
+    snprintf(armhf_libbz2, sizeof(armhf_libbz2), "%s/runtime/armhf/lib/libbz2.so.1.0", layout->payload_pak_dir);
 
     return fs_path_exists(layout->manifest_path) &&
         fs_path_exists(layout->rom_stub_path) &&
         fs_path_exists(runtime_launch) &&
         fs_path_exists(pugwash_path) &&
-        fs_path_exists(armhf_rootfs_partaa);
+        fs_path_exists(armhf_rootfs_partaa) &&
+        fs_path_exists(armhf_libbz2);
 }
 
 int install_from_stage(const char *stage_root, const install_layout *layout, const install_state *state) {
@@ -781,6 +784,7 @@ static int install_armhf_runtime(const install_layout *layout) {
     char src[PATH_MAX];
     char dst[PATH_MAX];
     char url[PATH_MAX];
+    char output_path[PATH_MAX];
     const char *parts[] = {
         "miyoo355_rootfs_32.img_partaa",
         "miyoo355_rootfs_32.img_partab",
@@ -791,21 +795,28 @@ static int install_armhf_runtime(const install_layout *layout) {
     if (format_checked(src, sizeof(src), "%s/armhf", layout->runtime_tools_dir) != 0 ||
             format_checked(dst, sizeof(dst), "%s/runtime/armhf", layout->payload_pak_dir) != 0)
         return -1;
-    if (fs_path_exists(src))
-        return replace_tree(src, dst);
-
-    if (fs_ensure_dir(dst) != 0)
+    if (fs_path_exists(src)) {
+        if (replace_tree(src, dst) != 0)
+            return -1;
+    } else if (fs_ensure_dir(dst) != 0) {
         return -1;
+    }
 
     for (index = 0; index < sizeof(parts) / sizeof(parts[0]); index++) {
-        char output_path[PATH_MAX];
-
         if (format_checked(url, sizeof(url), "%s/%s", SPRUCE_FLIP_RAW_BASE, parts[index]) != 0 ||
                 format_checked(output_path, sizeof(output_path), "%s/%s", dst, parts[index]) != 0)
             return -1;
         if (download_if_missing(url, output_path) != 0)
             return -1;
     }
+
+    if (format_checked(url, sizeof(url), "%s/lib32/libbz2.so.1.0", SPRUCE_FLIP_RAW_BASE) != 0 ||
+            format_checked(output_path, sizeof(output_path), "%s/lib/libbz2.so.1.0", dst) != 0)
+        return -1;
+    if (download_if_missing(url, output_path) != 0)
+        return -1;
+    if (chmod(output_path, 0755) != 0)
+        return -1;
 
     return 0;
 }
