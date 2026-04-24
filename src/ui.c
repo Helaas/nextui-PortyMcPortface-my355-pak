@@ -23,12 +23,12 @@ int run_updater_ui(const status_model *model, ui_updater_choice *choice) {
     if (model == NULL || choice == NULL)
         return AP_ERROR;
 
-    footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_B, .label = "QUIT" };
     footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_X, .label = "REINSTALL" };
     footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_Y, .label = "SETTINGS", .is_confirm = true };
     if (model->action != ACTION_NONE) {
         footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_A, .label = "RUN", .is_confirm = true };
     }
+    footer[footer_count++] = (ap_footer_item){ .button = AP_BTN_B, .label = "QUIT" };
 
     *choice = UI_UPDATER_CANCEL;
     theme = ap_get_theme();

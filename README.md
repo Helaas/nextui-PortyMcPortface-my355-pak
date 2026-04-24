@@ -60,9 +60,9 @@ Porty McPortface will never have 100% compatibility with all ports. If a port do
 
 Main screen:
 
-- `A RUN` installs or updates the selected PortMaster runtime when work is available.
 - `X REINSTALL` refreshes the managed runtime without changing the selected version.
 - `Y SETTINGS` opens the on-device settings screen.
+- `A RUN` installs or updates the selected PortMaster runtime when work is available.
 - `B QUIT` exits Porty McPortface. When the installed runtime is already current, there is no `A CLOSE`; use `B QUIT`.
 
 Settings screen:

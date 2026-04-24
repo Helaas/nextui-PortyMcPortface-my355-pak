@@ -177,6 +177,94 @@ static int run_program(const char *label, const char *path) {
     return rc;
 }
 
+static int read_playback_path_control(char *buffer, size_t buffer_size) {
+    FILE *pipe;
+    char line[256];
+    int found = -1;
+
+    if (buffer == NULL || buffer_size == 0)
+        return -1;
+
+    pipe = popen("amixer cget numid=2", "r");
+    if (pipe == NULL)
+        return -1;
+
+    while (fgets(line, sizeof(line), pipe) != NULL) {
+        const char *prefix = ": values=";
+        char *start = strstr(line, prefix);
+        char *end;
+        size_t len;
+
+        if (start == NULL)
+            continue;
+
+        start += strlen(prefix);
+        while (*start == ' ' || *start == '\t')
+            start++;
+
+        end = start;
+        while (*end != '\0' && *end != '\n' && *end != '\r' && *end != ',' &&
+               *end != ' ' && *end != '\t') {
+            end++;
+        }
+
+        len = (size_t)(end - start);
+        if (len == 0 || len >= buffer_size)
+            continue;
+
+        memcpy(buffer, start, len);
+        buffer[len] = '\0';
+        found = 0;
+        break;
+    }
+
+    if (pclose(pipe) == -1)
+        return -1;
+
+    return found;
+}
+
+static int run_amixer_playback_path_set(const char *value) {
+    pid_t pid;
+    int rc;
+
+    if (value == NULL || value[0] == '\0')
+        return -1;
+
+    pid = fork();
+    if (pid < 0) {
+        log_message("PMI_WARN", "resume_audio_amixer_fork_failed errno=%d (%s)", errno, strerror(errno));
+        return -1;
+    }
+    if (pid == 0) {
+        execlp("amixer", "amixer", "cset", "numid=2", value, (char *)NULL);
+        _exit(127);
+    }
+
+    rc = wait_for_child(pid, "resume_audio_amixer");
+    if (rc != 0) {
+        log_message("PMI_WARN", "resume_audio_amixer_exit=%d value=%s", rc, value);
+        return -1;
+    }
+    return 0;
+}
+
+static void restore_resume_audio(void) {
+    char playback_path_value[32];
+
+    if (read_playback_path_control(playback_path_value, sizeof(playback_path_value)) != 0) {
+        log_message("PMI_WARN", "resume_audio_read_playback_path_failed");
+        return;
+    }
+
+    if (run_amixer_playback_path_set("0") != 0)
+        return;
+    if (run_amixer_playback_path_set(playback_path_value) != 0)
+        return;
+
+    log_message("PMI_DIAG", "resume_audio_playback_path_restored=%s", playback_path_value);
+}
+
 static int resolve_system_script(char *buffer, size_t buffer_size, const char *name) {
     const char *system_path = getenv("SYSTEM_PATH");
 
@@ -218,6 +306,8 @@ static int run_suspend_fallback(void) {
                     LED_BRIGHTNESS_PATH, errno, strerror(errno));
     }
     unlink(SYSTEM_SUSPEND_FLAG);
+    if (rc == 0)
+        restore_resume_audio();
     return rc;
 }
 
@@ -228,6 +318,8 @@ static int trigger_suspend(const char *reason) {
     log_message("PMI_DIAG", "power_lid_suspend reason=%s", reason);
     if (resolve_system_script(script_path, sizeof(script_path), "suspend") == 0) {
         rc = run_program("power_lid_suspend", script_path);
+        if (rc == 0)
+            restore_resume_audio();
         return rc == 0 ? 0 : -1;
     }
 

@@ -109,6 +109,8 @@ test-native:
 	sh tests/test_pm_sdl_compat_check.sh $(BUILD_DIR)/tests/pm-sdl-compat-check
 	cc -std=c11 -Wall -Wextra tools/pm-port-probe.c -o $(BUILD_DIR)/tests/pm-port-probe
 	sh tests/test_pm_port_probe.sh $(BUILD_DIR)/tests/pm-port-probe
+	cc -std=c11 -Wall -Wextra -Itests/fixtures tests/test_pm_power_lid_watch.c -o $(BUILD_DIR)/tests/test_pm_power_lid_watch
+	./$(BUILD_DIR)/tests/test_pm_power_lid_watch
 	sh tests/test_build_box64_cache.sh
 	cc -std=c11 -Wall -Wextra $(COMMON_INCLUDES) tests/test_platform.c src/platform.c -o $(BUILD_DIR)/tests/test_platform
 	./$(BUILD_DIR)/tests/test_platform
