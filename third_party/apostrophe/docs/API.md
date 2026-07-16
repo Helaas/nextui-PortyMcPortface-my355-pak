@@ -108,6 +108,7 @@ AP_ACTION_TRIGGERED
 AP_ACTION_SECONDARY_TRIGGERED
 AP_ACTION_CONFIRMED
 AP_ACTION_TERTIARY_TRIGGERED
+AP_ACTION_OPTION_CHANGED   // Options list standard value changed
 AP_ACTION_CUSTOM    // Alias of AP_ACTION_TRIGGERED (backward compatibility)
 ```
 
@@ -139,7 +140,7 @@ typedef struct {
     const char *font_path;         // Path to .ttf, NULL = auto
     const char *bg_image_path;     // Background image, NULL = none
     const char *log_path;          // Log file, NULL = stderr only
-    const char *primary_color_hex; // Override accent "#RRGGBB"
+    const char *primary_color_hex; // Override accent "#RRGGBB" or "#RRGGBBAA"
     bool        disable_background; // Set true to skip bg.png
     bool        is_nextui;         // Load theme from nextval.elf
     ap_cpu_speed cpu_speed;        // Set CPU at init; 0 = AP_CPU_SPEED_DEFAULT (no-op)
@@ -279,15 +280,15 @@ Get a pointer to the current theme. Modifiable.
 
 #### `int ap_theme_load_nextui(void)`
 
-Load theme colors from the NextUI configuration, including the fallback background color. Accepts both the current `color7` background key and the legacy `bgcolor` key for backward compatibility. Returns `AP_OK` on success, `AP_ERROR` on failure. Called automatically during `ap_init()` when `ap_config.is_nextui` is true.
+Load theme colors from the NextUI configuration, including the fallback background color. Theme values may use legacy six-digit `RRGGBB` or current eight-digit `RRGGBBAA` colors; eight-digit values preserve their alpha channel. Accepts both the current `color7` background key and the legacy `bgcolor` key for backward compatibility. Returns `AP_OK` on success, `AP_ERROR` on failure. Called automatically during `ap_init()` when `ap_config.is_nextui` is true.
 
 #### `ap_color ap_hex_to_color(const char *hex)`
 
-Parse a `#RRGGBB` hex string and return the corresponding `ap_color` (with alpha 255). Returns black `{0,0,0,255}` on invalid input.
+Parse a six-digit `RRGGBB` or eight-digit `RRGGBBAA` color and return the corresponding `ap_color`. Input may be bare or prefixed with `#`, `0x`, or `0X`, with surrounding whitespace; six-digit input receives alpha 255 and eight-digit input preserves its alpha channel. Returns black `{0,0,0,255}` on null or invalid input.
 
 #### `void ap_set_theme_color(const char *hex)`
 
-Parse a `#RRGGBB` string and apply it as the theme accent color: `ap_set_theme_color("#FF6600");`
+Parse an `RRGGBB` or `RRGGBBAA` string in any format accepted by `ap_hex_to_color()` and apply it as the theme accent color: `ap_set_theme_color("#FF6600");`
 
 #### `int ap_reload_background(const char *bg_path)`
 
@@ -935,6 +936,7 @@ Settings-style list where each row has a label and a configurable value area:
 | `AP_OPT_COLOR_PICKER` | A opens the color picker; if `confirm_button == AP_BTN_A`, picking a color also confirms the list |
 
 Action buttons are explicit in `ap_options_list_opts` (`action_button`, `secondary_action_button`, `confirm_button`), and footer hints remain visual-only.
+When `return_on_option_change` is enabled, a successful Left/Right cycle on a standard item exits immediately with `AP_ACTION_OPTION_CHANGED` after updating `selected_option`. If `confirm_button != AP_BTN_A`, pressing A on a standard item also cycles forward and returns `AP_ACTION_OPTION_CHANGED`. This keeps option-change exits distinct from `action_button`, which still reports `AP_ACTION_TRIGGERED`.
 When `confirm_button` is set to `AP_BTN_A`, A takes on a "confirm and exit" role across all item types:
 - **Standard items**: A confirms immediately (use Left/Right to change values).
 - **Keyboard/Color picker items**: A opens the sub-editor; confirming inside it also exits the options list with `AP_ACTION_CONFIRMED`. Cancelling the sub-editor returns to the list.
@@ -951,12 +953,13 @@ typedef struct {
     ap_button action_button;
     ap_button secondary_action_button;
     ap_button confirm_button;
+    bool      return_on_option_change;
     TTF_Font *label_font;          // Override option label text (default: AP_FONT_LARGE)
     TTF_Font *value_font;          // Override option value text (default: AP_FONT_TINY)
 } ap_options_list_opts;
 ```
 
-`label_font` overrides the font used for option labels; `value_font` overrides the font used for option values. When `NULL` (zero-init default), the widget uses `ap_get_font(AP_FONT_LARGE)` and `ap_get_font(AP_FONT_TINY)` respectively. Pass a font obtained from `ap_get_font()` or a custom-loaded `TTF_Font` to override.
+`return_on_option_change` makes standard-option changes return immediately with `AP_ACTION_OPTION_CHANGED` after the value updates. Leave it as `false` (the zero-init default) to keep the existing in-place behavior. `label_font` overrides the font used for option labels; `value_font` overrides the font used for option values. When `NULL` (zero-init default), the widget uses `ap_get_font(AP_FONT_LARGE)` and `ap_get_font(AP_FONT_TINY)` respectively. Pass a font obtained from `ap_get_font()` or a custom-loaded `TTF_Font` to override.
 
 **`ap_options_list_result`**:
 ```c
@@ -967,6 +970,8 @@ typedef struct {
     int            visible_start_index;
 } ap_options_list_result;
 ```
+
+`action` may be `AP_ACTION_OPTION_CHANGED` when `return_on_option_change` is enabled, `AP_ACTION_TRIGGERED` for `action_button`, `AP_ACTION_SECONDARY_TRIGGERED` for `secondary_action_button`, `AP_ACTION_SELECTED` for clickable rows, `AP_ACTION_CONFIRMED` for confirm exits, or `AP_ACTION_BACK`.
 
 ### Keyboard
 
@@ -1077,9 +1082,12 @@ Scrollable multi-section view for displaying information. Supports:
 ```c
 typedef enum {
     AP_DETAIL_BACK = 0,   // User pressed back
-    AP_DETAIL_ACTION      // User pressed the action button
+    AP_DETAIL_ACTION,     // User pressed the primary action button (A)
+    AP_DETAIL_SECONDARY_ACTION // User pressed the secondary action button (Y)
 } ap_detail_action;
 ```
+
+`ap_detail_screen()` exits with `AP_DETAIL_BACK` on B, `AP_DETAIL_ACTION` on A, and `AP_DETAIL_SECONDARY_ACTION` on Y. If you want the Y action to be visible to users, add a matching Y footer hint.
 
 **`ap_detail_opts`** (styling fields):
 ```c
